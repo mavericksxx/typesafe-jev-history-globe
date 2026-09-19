@@ -90,6 +90,19 @@ export class GalaxyBackdrop {
       }
     }
     ctx.putImageData(img, 0, 0);
+
+    // A dense field of single-pixel dust baked into the nebula itself (not
+    // the ~100 animated stars below, which are sparse over a full-page
+    // canvas) — this is what actually reads as "sparkle" rather than a flat
+    // dithered gradient. Ported from options.html's buildNebulaCache.
+    const dustRng = mulberry32(w + h + 17);
+    ctx.fillStyle = this.theme.starTint;
+    const dustCount = Math.round(w * h * 0.02);
+    for (let i = 0; i < dustCount; i++) {
+      if (dustRng() < 0.5) {
+        ctx.fillRect(Math.floor(dustRng() * w), Math.floor(dustRng() * h), 1, 1);
+      }
+    }
   }
 
   private initStars(): void {
@@ -121,9 +134,15 @@ export class GalaxyBackdrop {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.canvas.width = Math.round(viewportW * dpr);
     this.canvas.height = Math.round(viewportH * dpr);
-    const scale = this.theme.pixelScale || 8;
-    const lw = Math.max(60, Math.round(viewportW / scale));
-    const lh = Math.max(44, Math.round(viewportH / scale));
+    const scale = this.theme.pixelScale || 4;
+    // Dividing both dimensions by the same fixed CSS-px cell size keeps the
+    // upscaled block that exact size regardless of viewport shape — the
+    // floor below is a bare safety net (canvas needs >0 px), pitched low
+    // enough that it never engages at any real viewport height and so can't
+    // make the block size grow on a short/wide window.
+    const MIN_CELLS = 20;
+    const lw = Math.max(MIN_CELLS, Math.round(viewportW / scale));
+    const lh = Math.max(MIN_CELLS, Math.round(viewportH / scale));
     if (!this.low) {
       this.low = document.createElement("canvas");
       this.lowCtx = this.low.getContext("2d");

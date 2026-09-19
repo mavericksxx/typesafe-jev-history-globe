@@ -107,23 +107,26 @@ export class Globe {
     const o = this.overlayCtx;
     o.setTransform(1, 0, 0, 1, 0, 0);
     o.clearRect(0, 0, px, px);
+    // Core glow toned down to about half its old reach and intensity (r*1.15
+    // -> r*1.08, alpha .55 -> .28) so it stays a rim around the globe instead
+    // of bleeding into the data panel beside it.
     if (theme.rim === "steps") {
       for (let i = 5; i >= 1; i--) {
         o.beginPath();
-        o.arc(cx, cx, r * (1 + i * 0.018), 0, Math.PI * 2);
+        o.arc(cx, cx, r * (1 + i * 0.011), 0, Math.PI * 2);
         o.strokeStyle = accent;
-        o.globalAlpha = (0.1 * (6 - i)) / 5;
+        o.globalAlpha = (0.05 * (6 - i)) / 5;
         o.lineWidth = r * 0.05;
         o.stroke();
       }
       o.globalAlpha = 1;
     } else {
-      const glow = o.createRadialGradient(cx, cx, r * 0.86, cx, cx, r * 1.15);
+      const glow = o.createRadialGradient(cx, cx, r * 0.9, cx, cx, r * 1.08);
       glow.addColorStop(0, hexToRgba(accent, 0));
-      glow.addColorStop(1, hexToRgba(accent, 0.55));
+      glow.addColorStop(1, hexToRgba(accent, 0.28));
       o.save();
       o.beginPath();
-      o.arc(cx, cx, r * 1.15, 0, Math.PI * 2);
+      o.arc(cx, cx, r * 1.08, 0, Math.PI * 2);
       o.fillStyle = glow;
       o.fill();
       o.restore();

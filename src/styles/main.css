@@ -25,6 +25,9 @@
   --serif: "EB Garamond", et-book, Palatino, "Palatino Linotype", Georgia, serif;
   --mono: "IBM Plex Mono", Menlo, Consolas, monospace;
   --page-pad: clamp(16px, 4vw, 56px);
+  /* Soft dark halo used instead of solid text plates, so type stays legible
+     directly over the vivid galaxy backdrop without dimming it. */
+  --halo: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 0, 0, 0.65), 0 0 22px rgba(0, 0, 0, 0.42);
   color-scheme: dark;
 }
 :root[data-galaxy="deep-violet"] {
@@ -117,21 +120,16 @@ body {
 }
 
 header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px 24px; }
-/* text plates: tight, near-opaque backing so type reads clean over the galaxy, like a caption
-   printed on an astronomy plate rather than a scrim slapped over the whole page. */
-.hero-plate, .era-plate {
-  background: var(--paper);
-  background: color-mix(in srgb, var(--paper) 90%, transparent);
-  padding: 16px 20px;
-  border-radius: 10px;
-  box-shadow: 0 14px 34px -18px rgba(0, 0, 0, 0.7);
-  width: fit-content;
-  max-width: 100%;
-}
-h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; margin: 2px 0 8px; text-wrap: balance; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
-.dek { font-size: 1.2rem; line-height: 1.45; max-width: 58ch; margin: 0; color: var(--ink); }
+/* No solid text plates: headings and captions sit directly on the galaxy and
+   lean on a soft dark halo (--halo) for legibility instead of a dimming
+   backing box. Only .era-sec p (long narrative paragraphs) gets a faint,
+   low-blur scrim of its own further down, since running body text is the
+   one case a halo alone doesn't reliably carry. */
+.hero-plate, .era-plate { width: fit-content; max-width: 100%; }
+h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; margin: 2px 0 8px; text-wrap: balance; text-shadow: var(--halo); }
+.dek { font-size: 1.2rem; line-height: 1.45; max-width: 58ch; margin: 0; color: var(--ink); text-shadow: var(--halo); }
 .meta { font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; color: var(--ink-2); display: flex; gap: 8px; flex-wrap: wrap; }
-.meta span { border: 1px solid var(--ink); border-radius: 4px; padding: 3px 7px; background: var(--paper); background: color-mix(in srgb, var(--paper) 90%, transparent); }
+.meta span { border: 1px solid var(--ink-2); border-radius: 4px; padding: 3px 7px; text-shadow: var(--halo); }
 .meta .accent-chip { border-color: var(--ox); color: var(--ox); }
 
 /* layout: narrative column + sticky globe/timeline/panel */
@@ -140,7 +138,9 @@ h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; ma
 .narrative { grid-area: narrative; display: grid; gap: 14px; align-content: start; }
 .era-list { display: grid; gap: 8vh; }
 @media (min-width: 861px) {
-  .layout { grid-template-areas: "narrative stagecol"; grid-template-columns: 230px minmax(0, 1fr); align-items: start; gap: 32px; }
+  /* Wide enough that .era-sec p's 56ch measure actually fits at its own
+     font-size (was 230px, which forced ~28-character lines). */
+  .layout { grid-template-areas: "narrative stagecol"; grid-template-columns: 400px minmax(0, 1fr); align-items: start; gap: 32px; }
   .stage-col { position: sticky; top: calc(52px + env(safe-area-inset-top, 0px) + 18px); }
 }
 @media (min-width: 861px) and (max-width: 1240px) {
@@ -149,9 +149,25 @@ h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; ma
 }
 .era-sec { scroll-margin-top: 50vh; min-height: 48vh; display: flex; flex-direction: column; justify-content: center; }
 .era-plate { width: auto; }
-.era-sec h2 { font-weight: 400; font-size: 1.4rem; margin: 0 0 8px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
-.era-sec p { font-size: 1.02rem; line-height: 1.5; margin: 0; color: var(--ink-2); }
-.narrative-note { font-family: var(--mono); font-size: 10.5px; font-weight: 600; color: var(--ink-2); margin: 0; display: inline-block; background: var(--paper); background: color-mix(in srgb, var(--paper) 88%, transparent); padding: 4px 9px; border-radius: 5px; }
+.era-sec h2 { font-weight: 400; font-size: 1.4rem; margin: 0 0 8px; text-shadow: var(--halo); }
+/* The one deliberate exception to "no plates": running narrative prose is
+   long enough that a halo alone gets muddy over a busy nebula, so it keeps a
+   faint, low-blur scrim — much lighter than the old solid era-plate fill.
+   56ch (at this slightly-reduced size) keeps lines in the ~45-60 char range. */
+.era-sec p {
+  font-size: 0.98rem;
+  line-height: 1.55;
+  margin: 0;
+  color: var(--ink);
+  max-width: 56ch;
+  text-shadow: var(--halo);
+  background: color-mix(in srgb, var(--void) 40%, transparent);
+  backdrop-filter: blur(3px);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-inline: -10px;
+}
+.narrative-note { font-family: var(--mono); font-size: 10.5px; font-weight: 600; color: var(--ink-2); margin: 0; display: inline-block; text-shadow: var(--halo); }
 
 .stage { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 28px; align-items: start; }
 @media (max-width: 860px) { .stage { grid-template-columns: 1fr; } }
@@ -159,7 +175,7 @@ h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; ma
 /* globe */
 .globe-box { position: relative; aspect-ratio: 1 / 1; max-width: 100%; }
 .globe-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.year-chip { position: absolute; left: 14px; top: 14px; background: var(--paper); font-family: var(--mono); font-weight: 700; font-size: 20px; padding: 6px 12px; border-radius: 6px; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 1px var(--rule); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+.year-chip { position: absolute; left: 14px; top: 14px; font-family: var(--mono); font-weight: 700; font-size: 20px; padding: 6px 12px; font-variant-numeric: tabular-nums; text-shadow: var(--halo); }
 .hover { position: absolute; pointer-events: none; background: var(--paper); border: 1px solid var(--ink); border-radius: 6px; padding: 8px 10px; font-size: 15px; line-height: 1.3; max-width: 240px; }
 .hover small { display: block; font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); margin-top: 4px; }
 
@@ -174,7 +190,11 @@ h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; ma
 .speed { display: flex; border: 2px solid var(--ox); border-radius: 2px; overflow: hidden; box-shadow: 3px 3px 0 var(--ox); }
 .speed button { font-family: var(--mono); font-size: 11px; background: none; border: 0; padding: 5px 8px; cursor: pointer; color: var(--ink-2); }
 .speed button[aria-pressed="true"] { background: var(--ox); color: var(--void); }
-.tl-stage { position: relative; height: 34px; margin-top: 8px; touch-action: none; cursor: pointer; }
+/* margin-top is generous (not just breathing room) because .tl-handle-label
+   floats above the handle itself (bottom:100%) — at the reel's left edge
+   that label used to land right under the Play button above; this leaves
+   enough clearance for the label's own height regardless of handle position. */
+.tl-stage { position: relative; height: 34px; margin-top: 34px; touch-action: none; cursor: pointer; }
 .tl-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .tl-handle { position: absolute; top: -6px; bottom: -6px; width: 3px; margin-left: -1.5px; background: var(--ox); border-radius: 0; cursor: grab; box-shadow: 0 0 0 1px var(--paper); }
 .tl-handle:active { cursor: grabbing; }

@@ -62,7 +62,7 @@ export const GALAXY_THEMES = {
     accent2: "#e8d9ff",
     starTint: "#cfc0ff",
     shootRate: 0.0016,
-    pixelScale: 7,
+    pixelScale: 4,
     ditherLevels: 6,
     nebula: [
       { c: "#3a1d63", x: 0.28, y: 0.42, r: 0.55 },
@@ -90,7 +90,7 @@ export const GALAXY_THEMES = {
     accent2: "#fff3d6",
     starTint: "#fff3d6",
     shootRate: 0.002,
-    pixelScale: 7,
+    pixelScale: 4,
     ditherLevels: 6,
     nebula: [
       { c: "#f0c869", x: 0.5, y: 0.4, r: 0.2 },
@@ -119,7 +119,7 @@ export const GALAXY_THEMES = {
     accent2: "#dff7f4",
     starTint: "#9fd8d4",
     shootRate: 0.0007,
-    pixelScale: 8,
+    pixelScale: 4,
     ditherLevels: 4,
     nebula: [{ c: "#122426", x: 0.5, y: 0.5, r: 0.6 }],
     ocean: "#0b1416",
@@ -143,7 +143,7 @@ export const GALAXY_THEMES = {
     accent2: "#ffd9a8",
     starTint: "#ffd9a8",
     shootRate: 0.0015,
-    pixelScale: 8,
+    pixelScale: 4,
     ditherLevels: 5,
     nebula: [
       { c: "#6b3421", x: 0.3, y: 0.54, r: 0.55 },
@@ -171,7 +171,7 @@ export const GALAXY_THEMES = {
     accent2: "#bffff2",
     starTint: "#bffff2",
     shootRate: 0.0013,
-    pixelScale: 7,
+    pixelScale: 4,
     ditherLevels: 5,
     nebula: [
       { c: "#0c2b2c", x: 0.5, y: 0.5, r: 0.62 },
@@ -198,7 +198,7 @@ export const GALAXY_THEMES = {
     accent2: "#7fe8f0",
     starTint: "#ffb3ec",
     shootRate: 0.0018,
-    pixelScale: 11,
+    pixelScale: 5,
     ditherLevels: 6,
     nebula: [
       { c: "#401a5c", x: 0.3, y: 0.4, r: 0.56 },
