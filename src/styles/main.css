@@ -141,7 +141,7 @@ h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; ma
    check — not a permanent rAF loop. Sized to era-list's full height in
    CometRail#measure(). */
 .era-rail { position: absolute; left: 0; top: 0; width: 38px; image-rendering: pixelated; pointer-events: none; }
-.era-list { display: grid; gap: 16px; padding-left: 48px; }
+.era-list { display: grid; gap: 16px; padding-left: 48px; padding-bottom: 70vh; }
 @media (min-width: 861px) {
   /* Wide enough that .era-sec p's 56ch measure actually fits at its own
      font-size (was 230px, which forced ~28-character lines). */
