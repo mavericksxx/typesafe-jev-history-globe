@@ -3,5 +3,6 @@ node_modules
 dist
 data/raw/*.ndjson
 !data/raw/sample.ndjson
+data/cache/
 .DS_Store
 *.tsbuildinfo

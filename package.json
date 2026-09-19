@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "gen-synthetic": "tsx scripts/gen-synthetic.ts",
+    "fetch-wikidata": "tsx scripts/fetch-wikidata.ts",
     "build-data": "tsx scripts/build-data.ts",
     "deploy": "wrangler pages deploy dist --project-name epochs"
   },

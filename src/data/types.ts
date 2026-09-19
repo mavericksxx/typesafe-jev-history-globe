@@ -74,6 +74,10 @@ export interface RawEventRecord {
   impact: number;
   real: boolean;
   minor: boolean;
+  /** Wikidata QID, when this record was sourced from Wikidata (scripts/fetch-wikidata.ts). Absent for synthetic/mock records. */
+  qid?: string;
+  /** Citation URL (Wikipedia article or Wikidata entity), when sourced from Wikidata. */
+  source?: string;
 }
 
 /**

@@ -80,7 +80,7 @@ export const LANDMARKS: LandmarkEvent[] = [
   // Industrial age
   { year: 1830, lat: 53.41, lon: -2.98, text: "Liverpool-Manchester railway opens", top: "economy" },
   { year: 1868, lat: 35.68, lon: 139.69, text: "Meiji Restoration begins in Japan", top: "politics" },
-  { year: 1885, lat: 52.52, lon: 13.4, text: "Berlin Conference partitions Africa", top: "politics" },
+  { year: 1884, lat: 52.52, lon: 13.4, text: "Berlin Conference partitions Africa", top: "politics" },
 
   // World wars
   { year: 1914, lat: 43.86, lon: 18.41, text: "Assassination in Sarajevo triggers the First World War", top: "war" },
