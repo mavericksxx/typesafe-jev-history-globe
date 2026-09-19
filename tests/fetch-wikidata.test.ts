@@ -11,6 +11,9 @@ import {
   parseWikidataYear,
   PERIODS,
   resolveQuotas,
+  resolveThemeQuotas,
+  THEME_CLASSES,
+  THEME_SHARES,
 } from "../scripts/fetch-wikidata";
 import { THEMES } from "../src/data/types";
 
@@ -297,6 +300,91 @@ describe("bindingToRecord with a resolved fallback rung (Part 1)", () => {
   it("derives theme from ?class when supplied", () => {
     const rec = bindingToRecord({ ...base, class: { value: "http://www.wikidata.org/entity/Q3918" } });
     expect(rec!.th.science).toBeGreaterThan(rec!.th.war);
+  });
+});
+
+describe("THEME_SHARES (bucketed selection: fixing the culture/city skew)", () => {
+  it("sums to exactly 1", () => {
+    const sum = THEMES.reduce((s, t) => s + THEME_SHARES[t], 0);
+    expect(sum).toBeCloseTo(1, 9);
+  });
+
+  it("gives no single theme half or more of the sample", () => {
+    for (const t of THEMES) expect(THEME_SHARES[t]).toBeLessThan(0.5);
+  });
+
+  it("gives every theme a meaningful floor (no theme is a token sliver)", () => {
+    for (const t of THEMES) expect(THEME_SHARES[t]).toBeGreaterThanOrEqual(0.1);
+  });
+
+  it("is not a flat 1/6 split — war and politics are weighted higher, reflecting the pre-modern record", () => {
+    expect(THEME_SHARES.war).toBeGreaterThan(1 / 6);
+    expect(THEME_SHARES.politics).toBeGreaterThan(1 / 6);
+  });
+});
+
+describe("resolveThemeQuotas", () => {
+  const unlimited = Object.fromEntries(THEMES.map((t) => [t, Number.MAX_SAFE_INTEGER])) as Record<
+    (typeof THEMES)[number],
+    number
+  >;
+
+  it("gives each theme its proportional share when supply is unlimited", () => {
+    const quotas = resolveThemeQuotas(1000, unlimited);
+    for (const t of THEMES) expect(quotas[t]).toBe(Math.round(1000 * THEME_SHARES[t]));
+  });
+
+  it("sums to exactly the period quota via largest-remainder rounding when supply is unlimited", () => {
+    const quotas = resolveThemeQuotas(999, unlimited);
+    const total = THEMES.reduce((s, t) => s + quotas[t]!, 0);
+    expect(total).toBe(999);
+  });
+
+  it("caps a thin theme at its own ceiling instead of exceeding real supply", () => {
+    const ceilings = { ...unlimited, economy: 3 };
+    const quotas = resolveThemeQuotas(1000, ceilings);
+    expect(quotas.economy).toBe(3);
+  });
+
+  it("does not redistribute a thin theme's shortfall into other themes", () => {
+    const ceilings = { ...unlimited, science: 0 };
+    const quotas = resolveThemeQuotas(1000, ceilings);
+    expect(quotas.science).toBe(0);
+    for (const t of THEMES) {
+      if (t === "science") continue;
+      expect(quotas[t]).toBe(Math.round(1000 * THEME_SHARES[t]));
+    }
+  });
+
+  it("never returns a negative quota", () => {
+    const zero = Object.fromEntries(THEMES.map((t) => [t, 0])) as Record<(typeof THEMES)[number], number>;
+    const quotas = resolveThemeQuotas(500, zero);
+    for (const t of THEMES) expect(quotas[t]).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("THEME_CLASSES (follow-up: economy/science class supply)", () => {
+  it("gives economy and science more than the original 3 narrow classes each", () => {
+    expect(THEME_CLASSES.economy.length).toBeGreaterThan(3);
+    expect(THEME_CLASSES.science.length).toBeGreaterThan(3);
+  });
+
+  it("every class in THEME_CLASSES has a unique qid across themes (no double-bucketing)", () => {
+    const seen = new Set<string>();
+    for (const t of THEMES) {
+      for (const c of THEME_CLASSES[t]) {
+        expect(seen.has(c.qid), `${c.qid} (${c.label}) appears in more than one theme`).toBe(false);
+        seen.add(c.qid);
+      }
+    }
+  });
+
+  it("every class's theme matches CLASS_THEME_MAP (derived consistently)", () => {
+    for (const t of THEMES) {
+      for (const c of THEME_CLASSES[t]) {
+        expect(CLASS_THEME_MAP[c.qid]).toBe(t);
+      }
+    }
   });
 });
 

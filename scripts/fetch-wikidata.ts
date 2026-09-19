@@ -201,55 +201,130 @@ export function classifyTheme(label: string): Record<Theme, number> {
   return scores;
 }
 
-// ---- Part 5: interim theme from Wikidata class, not label keywords --------
-// A curated qid->theme map for the classes this pipeline actually queries
-// (EVENT_CLASSES, the occurrence subclasses reachable from Q1190554, and
-// NON_EVENT_CLASSES below). It intentionally does NOT try to cover the full
-// ~283k-item occurrence subclass tree (measured live against QLever,
-// 2026-09-20) — that tree is far too broad and long-tailed for a hand-curated
-// map to be honest about. Any class not listed here falls back to
-// classifyTheme's label-keyword heuristic, which is what happens today for
-// every event. Having ?class from the query available is what makes this an
-// improvement: the common, high-volume classes (battle, treaty, election,
-// church buildings, universities, ...) now get an accurate, deterministic
-// theme instead of relying on the label matching a keyword.
-export const CLASS_THEME_MAP: Record<string, Theme> = {
-  // war
-  Q178561: "war", // battle
-  Q198: "war", // war
-  Q124734: "war", // siege
-  Q209749: "war", // invasion
-  Q45382: "war", // coup d'état (verified live: Q45382 is coup, not "rebellion" — see EVENT_CLASSES note)
-  // politics
-  Q131569: "politics", // treaty
-  Q1656682: "politics", // planned event (default political framing; usually ceremonies/summits)
-  Q40231: "politics", // election
-  Q209715: "politics", // coronation
-  Q10931: "politics", // revolution
-  Q1301371: "politics", // referendum
-  Q3624078: "politics", // sovereign state (used for P571/founding events)
-  // religion
-  Q747074: "religion", // ecumenical council
-  Q219557: "religion", // synod
-  Q16970: "religion", // church building
-  Q32815: "religion", // mosque
-  Q34627: "religion", // synagogue
-  Q44539: "religion", // temple
-  Q44613: "religion", // monastery
-  // economy
-  Q783794: "economy", // company/business
-  Q22667: "economy", // railway
-  Q12280: "economy", // bridge
-  // science
-  Q3918: "science", // university
-  Q3914: "science", // school
-  Q62832: "science", // observatory
-  // culture
-  Q33506: "culture", // museum
-  Q24354: "culture", // theatre building
-  Q22698: "culture", // park
-  Q515: "culture", // city (founding — closest single-theme fit for a settlement's inception)
+// ---- Part 5 (+ follow-up: per-theme bucketed selection) -------------------
+// THEME_CLASSES is the single source of truth for every Wikidata class this
+// pipeline queries by name: it drives CLASS_THEME_MAP (Part 5's theme
+// derivation), EVENT_CLASSES/NON_EVENT_CLASSES (kept as derived views for the
+// verify script and classValuesClause), and the per-theme candidate queries
+// added in the follow-up pass below (buildThemeCandidatesQuery).
+//
+// `dateKind` says which Wikidata properties carry the date: "event" classes
+// (battles, treaties, elections, ...) use P585 (point in time) / P580 (start
+// time); "institution" classes (church buildings, universities, companies,
+// ...) use P571 (inception) / P1619 (official opening) / P576 (dissolved),
+// per Part 3.
+//
+// Every QID below was verified live 2026-09-20 against the endpoint
+// (`SELECT ?label WHERE { wd:QID rdfs:label ?label . FILTER(LANG(?label)='en') }`,
+// batched via VALUES) via scripts/verify-event-classes.ts, which is the
+// authoritative source of truth — run `tsx scripts/verify-event-classes.ts`
+// before trusting or extending this list. This file's history has already
+// caught eleven wrong QIDs across three passes: six in the original
+// EVENT_CLASSES draft, two in the original NON_EVENT_CLASSES draft
+// (Q495015 "Fudan University" swapped in for observatory, and a flagged
+// Q11424 railway placeholder), and three more in this pass's first attempt
+// at broadening war/politics/religion event classes — Q209749 turned out to
+// be "Gjirokastër District" (not invasion — dropped, no clean replacement
+// found), Q219557 is "cult film" (not synod — replaced with the verified
+// Q111161), Q747074 is "comune of Italy" (not ecumenical council — replaced
+// with the verified Q51645), Q1301371 is "computer network" (not referendum
+// — replaced with the verified Q43109), and Q124734 (originally guessed as
+// "siege") is actually "rebellion" — kept under that correct label, with the
+// real "siege" class added separately as the verified Q188055.
+interface ThemeClass {
+  qid: string;
+  label: string;
+  dateKind: "event" | "institution";
+}
+
+export const THEME_CLASSES: Record<Theme, ThemeClass[]> = {
+  war: [
+    { qid: "Q178561", label: "battle", dateKind: "event" },
+    { qid: "Q198", label: "war", dateKind: "event" },
+    { qid: "Q188055", label: "siege", dateKind: "event" },
+    { qid: "Q124734", label: "rebellion", dateKind: "event" },
+    { qid: "Q45382", label: "coup d'état", dateKind: "event" },
+  ],
+  politics: [
+    { qid: "Q131569", label: "treaty", dateKind: "event" },
+    { qid: "Q1656682", label: "planned event", dateKind: "event" },
+    { qid: "Q40231", label: "public election", dateKind: "event" },
+    { qid: "Q209715", label: "coronation", dateKind: "event" },
+    { qid: "Q10931", label: "revolution", dateKind: "event" },
+    { qid: "Q43109", label: "referendum", dateKind: "event" },
+  ],
+  religion: [
+    { qid: "Q51645", label: "ecumenical council", dateKind: "event" },
+    { qid: "Q111161", label: "synod", dateKind: "event" },
+    { qid: "Q16970", label: "church building", dateKind: "institution" },
+    { qid: "Q32815", label: "mosque", dateKind: "institution" },
+    { qid: "Q34627", label: "synagogue", dateKind: "institution" },
+    { qid: "Q44539", label: "temple", dateKind: "institution" },
+    { qid: "Q44613", label: "monastery", dateKind: "institution" },
+  ],
+  // Previously just company/railway/bridge (measured 1.2% of the pilot
+  // sample) — bank, stock exchange and port added this pass, each verified
+  // live, to actually supply an economy bucket instead of leaving it to
+  // starve on three narrow classes.
+  economy: [
+    { qid: "Q783794", label: "company", dateKind: "institution" },
+    { qid: "Q22667", label: "railway", dateKind: "institution" },
+    { qid: "Q12280", label: "bridge", dateKind: "institution" },
+    { qid: "Q22687", label: "bank", dateKind: "institution" },
+    { qid: "Q11691", label: "stock exchange", dateKind: "institution" },
+    { qid: "Q44782", label: "port", dateKind: "institution" },
+  ],
+  // Previously just university/school/observatory (measured 2.3%) — hospital,
+  // library, research institute and botanical garden added this pass.
+  science: [
+    { qid: "Q3918", label: "university", dateKind: "institution" },
+    { qid: "Q3914", label: "school", dateKind: "institution" },
+    { qid: "Q62832", label: "observatory", dateKind: "institution" },
+    { qid: "Q16917", label: "hospital", dateKind: "institution" },
+    { qid: "Q7075", label: "library", dateKind: "institution" },
+    { qid: "Q31855", label: "research institute", dateKind: "institution" },
+    { qid: "Q167346", label: "botanical garden", dateKind: "institution" },
+  ],
+  culture: [
+    { qid: "Q33506", label: "museum", dateKind: "institution" },
+    { qid: "Q24354", label: "theatre building", dateKind: "institution" },
+    { qid: "Q22698", label: "park", dateKind: "institution" },
+    { qid: "Q515", label: "city", dateKind: "institution" },
+  ],
 };
+
+/** Derived from THEME_CLASSES: every event-dated (P585/P580) class, across
+ * all themes. Exported for scripts/verify-event-classes.ts and kept as the
+ * name this codebase has used since the original hand-picked list. */
+export const EVENT_CLASSES: { qid: string; label: string }[] = THEMES.flatMap((t) =>
+  THEME_CLASSES[t].filter((c) => c.dateKind === "event").map(({ qid, label }) => ({ qid, label }))
+);
+
+/** Derived from THEME_CLASSES: every institution-dated (P571/P1619/P576)
+ * class — by construction these are all in religion/economy/science/culture,
+ * since war and politics classes here are all event-shaped. */
+export const NON_EVENT_CLASSES: { qid: string; label: string }[] = THEMES.flatMap((t) =>
+  THEME_CLASSES[t].filter((c) => c.dateKind === "institution").map(({ qid, label }) => ({ qid, label }))
+);
+
+/** Derived from THEME_CLASSES: qid -> theme, for classifyThemeFromClass
+ * (Part 5) and the per-theme candidate queries below. Any class not listed
+ * here (almost all of the ~283k-item occurrence subclass tree, measured live
+ * against QLever 2026-09-20 — far too broad and long-tailed to hand-curate
+ * honestly) falls back to classifyTheme's label-keyword heuristic for scoring,
+ * and to the "politics" catch-all bucket for selection (see
+ * buildThemeCandidatesQuery) — both defaults matching classifyTheme's own
+ * "no keyword match -> politics" fallback. */
+export const CLASS_THEME_MAP: Record<string, Theme> = Object.fromEntries(
+  THEMES.flatMap((t) => THEME_CLASSES[t].map((c) => [c.qid, t] as const))
+);
+
+/** Every explicitly-classed qid across all six themes — used to exclude
+ * them from the "politics" catch-all bucket's broadened occurrence query, so
+ * an item explicitly classed as e.g. a battle or a church building is only
+ * ever offered to its own theme's bucket, never double-counted into
+ * politics's catch-all too. */
+const ALL_MAPPED_QIDS: string[] = Object.keys(CLASS_THEME_MAP);
 
 /** Interim theme derivation for Part 5: prefers the class->theme map (when
  * the query supplied a recognised ?class), falling back to the label-keyword
@@ -264,73 +339,82 @@ export function classifyThemeFromClass(label: string, classQid: string | undefin
   return scores;
 }
 
-// ---- SPARQL -----------------------------------------------------------------
-
-// A curated list of common historical-event classes, queried by direct
-// wdt:P31 (VALUES + UNION of direct instance-of) rather than a transitive
-// wdt:P31/wdt:P279* walk from a broad root like "occurrence" (Q1190554).
-// The transitive form times out (HTTP 504) at Wikidata's scale — it has to
-// walk a huge subclass tree for every candidate item. A fixed class list is
-// the standard workaround and is cheap enough to page through repeatedly.
+// ---- Follow-up: target theme shares for bucketed selection -----------------
+// Ranking selection by one global sitelink order per period (the original
+// Part 4) systematically favours whichever theme's classes happen to carry
+// the highest sitelink counts — measured live in the first pilot: cities
+// (culture) dominated at 41.9%, war/politics took most of the rest, and
+// economy/science were nearly absent (1.2% / 2.3%). Fixing that means giving
+// each theme its own quota, ranked by sitelinks WITHIN that theme, so a
+// modest economy or science item competes only against other economy/science
+// items instead of against cities and battles.
 //
-// Every QID below was resolved against the live SPARQL endpoint
-// (`SELECT ?label WHERE { wd:QID rdfs:label ?label . FILTER(LANG(?label)='en') }`)
-// to confirm its rdfs:label before being trusted here — see
-// scripts/verify-event-classes.ts, which re-runs that check and is the
-// authoritative source of truth for this list (run with
-// `tsx scripts/verify-event-classes.ts`). The previous list had six wrong
-// QIDs (verified 2026-09-20): Q124757 is "riot" not "siege", Q3839081 is
-// "disaster" not "massacre", Q1002697 is "periodical" (a magazine type) not
-// "military occupation", Q3241045 is "disease outbreak" not "uprising",
-// Q45382 is "coup d'état" not "rebellion", and Q2334719 is "legal case" not
-// "historical event". Those six are dropped rather than replaced 1:1, since
-// this script broadens the class set structurally in Part 2 instead
-// (occurrence subclasses + dated non-event institutions) rather than
-// hand-picking more QIDs here.
-export const EVENT_CLASSES = [
-  { qid: "Q1190554", label: "occurrence" },
-  { qid: "Q178561", label: "battle" },
-  { qid: "Q198", label: "war" },
-  { qid: "Q131569", label: "treaty" },
-  { qid: "Q1656682", label: "planned event" },
-] as const;
+// These shares are NOT a flat 1/6 each — a rigid equal split would be its
+// own distortion, since war and politics genuinely dominate the pre-modern
+// historical record Wikidata documents. Instead: war and politics each get a
+// generous-but-bounded 25% (the two together are exactly half the sample,
+// not more), religion and culture get a moderate 15% each (both have deep,
+// genuine historical supply — councils/temples and cities/monuments — without
+// being as universally document-dense as war/politics), and economy/science
+// get 10% each (real but comparatively thin categories of dated institutions
+// in Wikidata's structured data, versus the much larger corpus of recorded
+// wars, treaties and elections). No single theme exceeds a quarter of any
+// period's quota; every theme is guaranteed a meaningful floor rather than
+// being crowded out entirely. A period whose record for a given theme is
+// thinner than its share (Part 2/3's ceiling for that theme, in that period)
+// simply gets fewer of that theme — never padded or backfilled from another
+// theme, same non-redistribution principle resolveQuotas already uses across
+// periods.
+export const THEME_SHARES: Record<Theme, number> = {
+  war: 0.25,
+  politics: 0.25,
+  religion: 0.15,
+  culture: 0.15,
+  economy: 0.1,
+  science: 0.1,
+};
 
-// Part 2c: dated non-event institutions/structures. These usually carry
-// wdt:P625 (coordinates) directly on the item itself (unlike most
-// non-military "occurrences", which point at a location rather than having
-// one) and their P571/P1619/P576 dates reach far back into antiquity —
-// expected to be the largest single recovery for the religion/economy/
-// science/culture themes and for pre-500-AD periods generally.
-// Every QID below was verified live 2026-09-20 against the endpoint (batched
-// VALUES + rdfs:label lookup, same pattern EVENT_CLASSES uses) via
-// scripts/verify-event-classes.ts, which now checks this list too. Two QIDs
-// from the original draft were wrong and are corrected here: Q495015 is
-// "Fudan University" not "observatory" (replaced with Q62832, the actual
-// "observatory" class), and Q11424 was an explicitly-flagged placeholder for
-// "railway" (replaced with Q22667, the real "railway" class).
-export const NON_EVENT_CLASSES = [
-  { qid: "Q515", label: "city" },
-  { qid: "Q44613", label: "monastery" },
-  { qid: "Q16970", label: "church building" },
-  { qid: "Q32815", label: "mosque" },
-  { qid: "Q34627", label: "synagogue" },
-  { qid: "Q44539", label: "temple" },
-  { qid: "Q3914", label: "school" },
-  { qid: "Q3918", label: "university" },
-  { qid: "Q62832", label: "observatory" },
-  { qid: "Q783794", label: "company" },
-  { qid: "Q22698", label: "park" },
-  { qid: "Q22667", label: "railway" },
-  { qid: "Q12280", label: "bridge" },
-  { qid: "Q24354", label: "theatre building" },
-  { qid: "Q33506", label: "museum" },
-] as const;
+const THEME_SHARE_SUM = THEMES.reduce((s, t) => s + THEME_SHARES[t], 0);
+if (Math.abs(THEME_SHARE_SUM - 1) > 1e-9) {
+  throw new Error(`THEME_SHARES must sum to 1, got ${THEME_SHARE_SUM}`);
+}
+
+/** Splits one period's quota across the six themes by THEME_SHARES, capping
+ * each theme at its own supply ceiling for that period (Part 2/3's per-theme
+ * candidate count) rather than redistributing a thin theme's shortfall to
+ * another theme — the same largest-remainder-with-caps approach
+ * `resolveQuotas` already uses across periods, applied across themes within
+ * one period instead. */
+export function resolveThemeQuotas(
+  periodQuota: number,
+  ceilings: Record<Theme, number>
+): Record<Theme, number> {
+  const raw = THEMES.map((t) => periodQuota * THEME_SHARES[t]);
+  const floors = raw.map((v) => Math.floor(v));
+  let leftover = periodQuota - floors.reduce((a, b) => a + b, 0);
+  const remainders = raw
+    .map((v, i) => ({ i, frac: v - floors[i]! }))
+    .sort((a, b) => b.frac - a.frac);
+  const shares = [...floors];
+  for (const { i } of remainders) {
+    if (leftover <= 0) break;
+    shares[i] = shares[i]! + 1;
+    leftover--;
+  }
+  const out = {} as Record<Theme, number>;
+  THEMES.forEach((t, i) => {
+    out[t] = Math.max(0, Math.min(shares[i]!, ceilings[t] ?? 0));
+  });
+  return out;
+}
+
+// ---- SPARQL -----------------------------------------------------------------
 
 /** P571 (inception), P1619 (official opening), P576 (dissolved) — the dates
  * Part 3's dated non-event items carry instead of P585/P580. */
 export const NON_EVENT_DATE_PROPS = ["P571", "P1619", "P576"] as const;
 
-function classValuesClause(classes: readonly { qid: string }[] = EVENT_CLASSES): string {
+function classValuesClause(classes: readonly { qid: string }[]): string {
   return `VALUES ?class { ${classes.map((c) => `wd:${c.qid}`).join(" ")} }`;
 }
 
@@ -351,45 +435,23 @@ function classValuesClause(classes: readonly { qid: string }[] = EVENT_CLASSES):
 // re-resolved (coordinates, label, sitelinks) against live WDQS, so a stale
 // or since-deleted QID just fails to resolve and is silently dropped.
 //
-// Selection is ranked (Part 4): ORDER BY DESC(?sitelinks) LIMIT N, not the
-// old arbitrary ORDER BY ?item, so a broadened class set doesn't hand back an
-// arbitrary IRI-ordered slice once Wikidata over-supplies a period.
+// Selection used to rank once globally per period (ORDER BY DESC(?sitelinks)
+// LIMIT N) — this function is kept for the overall period-ceiling figure
+// `main()` reports, but actual event selection now runs per theme bucket
+// (buildThemeCandidatesQuery below), since a single global sitelink ranking
+// measurably let high-sitelink classes (cities, battles) crowd out
+// low-sitelink ones (a bank, a synod) regardless of theme — see THEME_SHARES.
 // NOTE: the raw (pre-SAMPLE) pattern variables are named ?dateRaw/?articleRaw/
 // ?sitelinksRaw, distinct from the SELECTed ?date/?article/?sitelinks —
 // QLever (unlike WDQS/Blazegraph) rejects "the target of an AS clause was
 // already used in the query body", i.e. `(SAMPLE(?x) AS ?x)` is invalid there.
-function buildCandidatesQuery(period: Period, limit: number): string {
-  const nonEventValues = classValuesClause(NON_EVENT_CLASSES);
-  const nonEventDates = NON_EVENT_DATE_PROPS.map((p) => `{ ?item wdt:${p} ?dateRaw }`).join(" UNION ");
-  return `SELECT ?item ?class (SAMPLE(?dateRaw) AS ?date) (SAMPLE(?articleRaw) AS ?article) (SAMPLE(?sitelinksRaw) AS ?sitelinks) WHERE {
-  {
-    # Part 2: occurrence subclass closure, walked inline by QLever.
-    ?item wdt:P31 ?class .
-    ?class wdt:P279* wd:Q1190554 .
-    { ?item wdt:P585 ?dateRaw } UNION { ?item wdt:P580 ?dateRaw }
-  } UNION {
-    # Part 3: dated non-event institutions/structures.
-    ${nonEventValues}
-    ?item wdt:P31 ?class .
-    ${nonEventDates}
-  }
-  FILTER(YEAR(?dateRaw) >= ${period.start} && YEAR(?dateRaw) < ${period.end})
-  ?item wikibase:sitelinks ?sitelinksRaw .
-  OPTIONAL {
-    ?articleRaw schema:about ?item ;
-             schema:isPartOf <https://en.wikipedia.org/> .
-  }
-}
-GROUP BY ?item ?class
-ORDER BY DESC(?sitelinks) ?item
-LIMIT ${limit}`;
-}
 
 /** Stage-1 ceiling: how many qualifying (item, class, date) candidates exist
  * for a period with NO coordinate requirement — the number Part 1 says is
- * roughly 3x the old coordinate-required ceiling. This is what `resolveQuotas`
- * is measured against now; coordinate resolution in stage 2 then determines
- * how many of those candidates actually make it into the output. */
+ * roughly 3x the old coordinate-required ceiling. Reported in `main()` as the
+ * overall period ceiling; actual selection now runs per-theme (see
+ * buildThemeCandidatesQuery / resolveThemeQuotas below), each capped by its
+ * own theme ceiling from buildThemeCandidateCountQuery. */
 function buildCandidateCountQuery(period: Period): string {
   const nonEventValues = classValuesClause(NON_EVENT_CLASSES);
   const nonEventDates = NON_EVENT_DATE_PROPS.map((p) => `{ ?item wdt:${p} ?date }`).join(" UNION ");
@@ -404,6 +466,70 @@ function buildCandidateCountQuery(period: Period): string {
     ${nonEventDates}
   }
   FILTER(YEAR(?date) >= ${period.start} && YEAR(?date) < ${period.end})
+}`;
+}
+
+// ---- Follow-up: per-theme candidate queries (bucketed selection) ----------
+// Builds the WHERE-clause body (no SELECT/GROUP BY/ORDER/LIMIT wrapper) that
+// selects candidates belonging to one theme bucket: its own explicit classes
+// (split into event-dated and institution-dated groups, per THEME_CLASSES),
+// plus — for "politics" only — the broadened occurrence-subclass catch-all
+// (Part 2), excluding every explicitly-classed qid so an item already bucketed
+// under war/religion/economy/science/culture isn't also double-counted into
+// politics's catch-all. This is what makes selection compete like-for-like
+// within a theme instead of one global sitelink ranking letting
+// high-sitelink classes (cities, battles) crowd out low-sitelink ones
+// (a bank, a synod) regardless of theme.
+function themeQueryBody(theme: Theme, period: Period): string {
+  const classes = THEME_CLASSES[theme];
+  const eventClasses = classes.filter((c) => c.dateKind === "event");
+  const instClasses = classes.filter((c) => c.dateKind === "institution");
+  const branches: string[] = [];
+  if (eventClasses.length > 0) {
+    branches.push(`{
+    ${classValuesClause(eventClasses)}
+    ?item wdt:P31 ?class .
+    { ?item wdt:P585 ?dateRaw } UNION { ?item wdt:P580 ?dateRaw }
+  }`);
+  }
+  if (instClasses.length > 0) {
+    const dateUnion = NON_EVENT_DATE_PROPS.map((p) => `{ ?item wdt:${p} ?dateRaw }`).join(" UNION ");
+    branches.push(`{
+    ${classValuesClause(instClasses)}
+    ?item wdt:P31 ?class .
+    ${dateUnion}
+  }`);
+  }
+  if (theme === "politics") {
+    const excluded = ALL_MAPPED_QIDS.map((q) => `wd:${q}`).join(", ");
+    branches.push(`{
+    ?item wdt:P31 ?class .
+    ?class wdt:P279* wd:Q1190554 .
+    FILTER(?class NOT IN (${excluded}))
+    { ?item wdt:P585 ?dateRaw } UNION { ?item wdt:P580 ?dateRaw }
+  }`);
+  }
+  return `${branches.join(" UNION ")}
+  FILTER(YEAR(?dateRaw) >= ${period.start} && YEAR(?dateRaw) < ${period.end})`;
+}
+
+function buildThemeCandidatesQuery(theme: Theme, period: Period, limit: number): string {
+  return `SELECT ?item ?class (SAMPLE(?dateRaw) AS ?date) (SAMPLE(?articleRaw) AS ?article) (SAMPLE(?sitelinksRaw) AS ?sitelinks) WHERE {
+  ${themeQueryBody(theme, period)}
+  ?item wikibase:sitelinks ?sitelinksRaw .
+  OPTIONAL {
+    ?articleRaw schema:about ?item ;
+             schema:isPartOf <https://en.wikipedia.org/> .
+  }
+}
+GROUP BY ?item ?class
+ORDER BY DESC(?sitelinks) ?item
+LIMIT ${limit}`;
+}
+
+function buildThemeCandidateCountQuery(theme: Theme, period: Period): string {
+  return `SELECT (COUNT(DISTINCT ?item) AS ?c) WHERE {
+  ${themeQueryBody(theme, period)}
 }`;
 }
 
@@ -531,9 +657,25 @@ async function runQuery(query: string, cacheTag: string, endpoint = ENDPOINT): P
   const url = `${endpoint}?query=${encodeURIComponent(fullQuery)}&format=json`;
   for (let attempt = 0; ; attempt++) {
     await politeDelay();
-    const res = await fetch(url, {
-      headers: { "User-Agent": USER_AGENT, Accept: "application/sparql-results+json" },
-    });
+    // A network-level failure (socket reset, etc.) throws before `fetch`
+    // even produces a Response — observed live 2026-09-20 ("other side
+    // closed" mid-request). Treat that the same as a retryable HTTP status
+    // rather than letting it abort the whole run; it's exactly the kind of
+    // transient public-endpoint hiccup this retry loop already exists for.
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { "User-Agent": USER_AGENT, Accept: "application/sparql-results+json" },
+      });
+    } catch (err) {
+      if (attempt >= MAX_RETRIES) throw err;
+      const backoffMs = RATE_LIMIT_MS * 2 ** attempt;
+      console.warn(
+        `  network error on ${cacheTag} (${(err as Error).message}), retrying in ${Math.round(backoffMs / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})`
+      );
+      await new Promise((r) => setTimeout(r, backoffMs));
+      continue;
+    }
     if (res.ok) {
       const json = await res.json();
       writeFileSync(cacheFile, JSON.stringify(json));
@@ -556,6 +698,20 @@ async function fetchCeiling(period: Period, periodIdx: number): Promise<number> 
   const json = (await runQuery(buildCandidateCountQuery(period), `count-${periodIdx}`, QLEVER_ENDPOINT)) as {
     results: { bindings: { c: { value: string } }[] };
   };
+  const raw = json.results.bindings[0]?.c?.value;
+  return raw ? Number(raw) : 0;
+}
+
+/** Per-theme stage-1 ceiling (follow-up to Part 4): how many candidates exist
+ * for one theme bucket in one period, with no coordinate requirement. Feeds
+ * `resolveThemeQuotas` and the per-period-per-theme ceiling table in the
+ * report. */
+async function fetchThemeCeiling(theme: Theme, period: Period, periodIdx: number): Promise<number> {
+  const json = (await runQuery(
+    buildThemeCandidateCountQuery(theme, period),
+    `theme-count-${periodIdx}-${theme}`,
+    QLEVER_ENDPOINT
+  )) as { results: { bindings: { c: { value: string } }[] } };
   const raw = json.results.bindings[0]?.c?.value;
   return raw ? Number(raw) : 0;
 }
@@ -686,14 +842,22 @@ async function resolveCoords(
   return map;
 }
 
-async function fetchPeriodEvents(period: Period, periodIdx: number, quota: number): Promise<RawEventRecord[]> {
+/** Runs stage 1 (candidate discovery for one theme bucket) + stage 2
+ * (coordinate resolution) for a single (period, theme, quota) slice, and
+ * returns the resolved records — everything fetchPeriodEvents used to do for
+ * the whole period in one global-ranked pass, now scoped to one theme bucket
+ * so a thin theme's items only ever compete against their own theme's items. */
+async function fetchThemeBucketEvents(
+  period: Period,
+  periodIdx: number,
+  theme: Theme,
+  quota: number
+): Promise<RawEventRecord[]> {
   if (quota <= 0) return [];
-  // Stage 1: rank-ordered candidates (Part 4), overfetched to absorb
-  // coordinate-resolution loss.
   const fetchLimit = Math.ceil(quota * COORD_OVERFETCH);
   const candJson = (await runQuery(
-    buildCandidatesQuery(period, fetchLimit),
-    `cand-${periodIdx}`,
+    buildThemeCandidatesQuery(theme, period, fetchLimit),
+    `theme-cand-${periodIdx}-${theme}`,
     QLEVER_ENDPOINT
   )) as SparqlResponse;
   const candidates = candJson.results?.bindings ?? [];
@@ -706,10 +870,10 @@ async function fetchPeriodEvents(period: Period, periodIdx: number, quota: numbe
   const qids = candidates.map((b) => qidFromUri(b.item.value));
   const labels = new Map<string, string>();
   for (const [i, batch] of chunk(qids, 300).entries()) {
-    const part = await resolveLabels(batch, `labels-${periodIdx}-${i}`);
+    const part = await resolveLabels(batch, `theme-labels-${periodIdx}-${theme}-${i}`);
     for (const [k, v] of part) labels.set(k, v);
   }
-  const coords = await resolveCoords(qids, `coords-${periodIdx}`);
+  const coords = await resolveCoords(qids, `theme-coords-${periodIdx}-${theme}`);
 
   const out: RawEventRecord[] = [];
   const seen = new Set<string>();
@@ -736,6 +900,29 @@ async function fetchPeriodEvents(period: Period, periodIdx: number, quota: numbe
     RUNG_STATS[resolved.rung]++;
     out.push(rec);
   }
+  return out;
+}
+
+/** For one period: measures each theme's ceiling, splits the period quota
+ * across themes via resolveThemeQuotas, fetches each theme bucket, and marks
+ * minor/non-minor across the whole period's combined output (so "top 2%" is
+ * still period-wide, not per-theme-diluted). */
+async function fetchPeriodEvents(period: Period, periodIdx: number, quota: number): Promise<RawEventRecord[]> {
+  if (quota <= 0) return [];
+  const ceilings = {} as Record<Theme, number>;
+  for (const theme of THEMES) {
+    ceilings[theme] = await fetchThemeCeiling(theme, period, periodIdx);
+  }
+  const themeQuotas = resolveThemeQuotas(quota, ceilings);
+
+  const out: RawEventRecord[] = [];
+  for (const theme of THEMES) {
+    const themeQuota = themeQuotas[theme]!;
+    if (themeQuota <= 0) continue;
+    const events = await fetchThemeBucketEvents(period, periodIdx, theme, themeQuota);
+    console.log(`    ${theme}: ${events.length}/${themeQuota} (ceiling ${ceilings[theme]})`);
+    out.push(...events);
+  }
   return markMinor(out);
 }
 
@@ -746,15 +933,46 @@ async function main(): Promise<void> {
 
   console.log(`fetch-wikidata: target ${target} events across ${PERIODS.length} periods (ceiling, not a quota to fill)`);
   const ceilings: number[] = [];
+  const themeCeilings: Record<Theme, number>[] = [];
   for (let i = 0; i < PERIODS.length; i++) {
     const c = await fetchCeiling(PERIODS[i]!, i);
     ceilings.push(c);
     console.log(`  ceiling ${PERIODS[i]!.label}: ${c} stage-1 candidates (date, coords waived — see coordinate-fallback stage)`);
+    const perTheme = {} as Record<Theme, number>;
+    for (const theme of THEMES) {
+      perTheme[theme] = await fetchThemeCeiling(theme, PERIODS[i]!, i);
+    }
+    themeCeilings.push(perTheme);
+    console.log(`    by theme: ${THEMES.map((t) => `${t}=${perTheme[t]}`).join(", ")}`);
   }
 
   const quotas = resolveQuotas(target, PERIODS, ceilings);
+  let shortfall = 0;
   for (let i = 0; i < PERIODS.length; i++) {
-    console.log(`  quota   ${PERIODS[i]!.label}: ${quotas[i]} (of ${Math.round(target * PERIODS[i]!.weight)} desired)`);
+    const desired = Math.round(target * PERIODS[i]!.weight);
+    console.log(`  quota   ${PERIODS[i]!.label}: ${quotas[i]} (of ${desired} desired)`);
+    // Follow-up (item 5): a theme can bind inside a period even when the
+    // period's own overall quota is well under its overall ceiling — check
+    // per-theme feasibility, not just the period total, so a skewed-but-full
+    // 40k doesn't get reported as "reachable" when a balanced split of the
+    // same target actually falls short.
+    const themeQuotas = resolveThemeQuotas(quotas[i]!, themeCeilings[i]!);
+    const themeTotal = THEMES.reduce((s, t) => s + themeQuotas[t]!, 0);
+    if (themeTotal < quotas[i]!) {
+      const short = quotas[i]! - themeTotal;
+      shortfall += short;
+      const binding = THEMES.filter((t) => themeQuotas[t]! < Math.round(quotas[i]! * THEME_SHARES[t]));
+      console.log(
+        `    per-theme split falls ${short} short of the period quota once balanced by THEME_SHARES (binding: ${binding.join(", ") || "none"})`
+      );
+    }
+  }
+  if (shortfall > 0) {
+    console.log(
+      `NOTE: a balanced (THEME_SHARES) split of target=${target} is ${shortfall} short of ${target} once every theme is capped at its own per-period ceiling — the honest achievable balanced total is ~${target - shortfall}, not ${target}.`
+    );
+  } else {
+    console.log(`target=${target} is fully reachable with a THEME_SHARES-balanced split — no theme binds inside any period.`);
   }
 
   if (dryRun) {
