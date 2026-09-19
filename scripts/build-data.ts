@@ -13,6 +13,7 @@ import type { LocKind, RawEventRecord } from "../src/data/types";
 import type { ColumnarIndex, EraCopy, Manifest, ManifestShard } from "../src/data/loader";
 import { mulberry32 } from "../src/data/rng";
 import { deriveExtra, regionOf } from "../src/data/derive";
+import { LANDMARKS } from "../src/data/landmarks";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -38,33 +39,95 @@ function writeHashed(base: string, ext: string, content: string): string {
   return file;
 }
 
-// Static narrative copy for the five scroll eras (see PLAN.md / reel.html's
-// `.era-sec` markup). Independent of the event dataset.
+// Narrative copy for the scroll eras (see narrative/index.ts / comet.ts,
+// which render/anchor these plus src/data/landmarks.ts's cards between
+// them). Independent of the event dataset. Global on purpose — not
+// Europe-only — with concrete places, people and dates in each body.
 const ERAS: EraCopy[] = [
   {
-    year: -2500,
-    title: "Ancient world",
-    body: "Writing, law codes, and monumental architecture appear within a few centuries of one another across Mesopotamia, Egypt, and the Indus Valley. Bronze Age states organize labor and trade at a scale unseen before, then much of the eastern Mediterranean collapses in a wave of upheaval around 1200 BC.",
+    year: -3000,
+    title: "Early civilisations",
+    body: "Sumerian cities like Uruk and Ur develop cuneiform writing and centralized temple economies along the Tigris and Euphrates, while Egypt unifies under its first pharaohs along the Nile and the Indus Valley's Harappa and Mohenjo-daro lay out planned streets and drainage. None of these societies yet know of the others; each invents administration, irrigation, and record-keeping on its own.",
   },
   {
-    year: -350,
-    title: "Classical",
-    body: "Greek city-states experiment with citizen assemblies while Persian, then Roman, empires bind vast territories under single administrations. Philosophy, coined currency, and codified law spread along the trade and military routes those empires cut.",
+    year: -2000,
+    title: "Bronze Age",
+    body: "Bronze weapons and chariots spread from the Near East to the Aegean and China, where the Shang dynasty casts ritual vessels along the Yellow River. Babylon rises under Hammurabi, whose law code is carved onto a stone stele around 1754 BC, while Minoan Crete trades across the Mediterranean. Long-distance trade in tin and copper links Britain, Anatolia, and the Levant into the first international bronze economy.",
   },
   {
-    year: 950,
-    title: "Medieval",
-    body: "After Rome's western half fragments, new centers of power rise in Byzantium, Baghdad, and the Carolingian court, each preserving and extending older learning. Feudal Europe, the Islamic Golden Age, and Song China develop largely apart, linked mainly by trade along the Silk Road.",
+    year: -1200,
+    title: "Iron Age empires",
+    body: "Around 1200 BC a wave of destructions — the Bronze Age Collapse — brings down Mycenaean Greece, the Hittite Empire, and cities across the eastern Mediterranean within a few decades. Iron tools and weapons, cheaper than bronze, spread as new powers rebuild: Assyria conquers an empire stretching from Egypt to the Persian Gulf, while Phoenician sailors carry an alphabet and colonies across the Mediterranean, from Tyre to Carthage.",
   },
   {
-    year: 1500,
+    year: -500,
+    title: "Classical Greece",
+    body: "Athens experiments with citizen assembly and jury courts while Sparta organizes itself entirely around its army; both unite briefly to repel Persian invasions at Marathon in 490 BC and Salamis in 480 BC. Philosophy, tragedy, and geometry flourish in Athens even as the Peloponnesian War exhausts the Greek city-states. Further east, the Achaemenid Persian Empire administers the largest state the world has yet seen, from Egypt to the Indus.",
+  },
+  {
+    year: -221,
+    title: "Rome & Han",
+    body: "Rome, having just defeated Carthage in the Punic Wars, expands from an Italian city-state into a Mediterranean power. In China, Qin Shi Huang unifies the warring states in 221 BC, and the Han dynasty that follows in 206 BC builds long-distance roads and standardizes currency and law, eventually trading indirectly with Rome via the Silk Road. At their height, Rome and Han China together govern close to half of the world's population.",
+  },
+  {
+    year: 250,
+    title: "Late antiquity",
+    body: "The Roman Empire strains under civil war and invasion, while Constantine legalizes Christianity in 313 and moves the capital east to Constantinople. In India, the Gupta Empire presides over advances in mathematics, including the concept of zero, and in Mesoamerica the Maya build monumental cities like Tikal. Han China collapses into competing kingdoms, and Buddhism spreads from India along trade routes into Central Asia and China.",
+  },
+  {
+    year: 600,
+    title: "Early medieval",
+    body: "The Prophet Muhammad's teachings in Mecca and Medina found a religion that, within a century of his death in 632, unites Arabia and conquers territory from Spain to Persia. In China, the Tang dynasty reunifies the empire in 618 and presides over a cosmopolitan capital at Chang'an, then the world's largest city. Western Europe fragments into small kingdoms after Rome's fall, while the Maya civilization reaches its classic-period height.",
+  },
+  {
+    year: 800,
+    title: "Islamic Golden Age",
+    body: "The Abbasid Caliphate, ruling from Baghdad, founds the House of Wisdom, where scholars translate Greek, Persian, and Indian texts and advance algebra, optics, and medicine. Trade networks connect Song-era China, India, East Africa's Swahili coast, and Muslim Spain, moving paper-making technology and Hindu-Arabic numerals into wider use. In West Africa, the Ghana Empire grows wealthy controlling trans-Saharan gold and salt trade.",
+  },
+  {
+    year: 1000,
+    title: "High medieval",
+    body: "Song China issues the world's first government paper currency and builds a canal and market economy supporting cities of a million people, while the Seljuk Turks expand from Persia into Anatolia. In 1096 the First Crusade sets out from Western Europe to capture Jerusalem, beginning two centuries of conflict and exchange between Christian and Muslim states. In sub-Saharan Africa, Great Zimbabwe's stone city rises as a trading hub for gold and ivory.",
+  },
+  {
+    year: 1200,
+    title: "Mongol era",
+    body: "Genghis Khan unites the Mongol tribes in 1206 and launches conquests that, within decades, create the largest contiguous land empire in history, stretching from Korea to Hungary. His successors sack Baghdad in 1258, ending the Abbasid Caliphate there, while the Pax Mongolica reopens Silk Road trade so thoroughly that Marco Polo can travel from Venice to Kublai Khan's court. The same routes also carry the plague that will become the Black Death toward Europe.",
+  },
+  {
+    year: 1400,
+    title: "Renaissance",
+    body: "After the Black Death kills roughly a third of Europe's population, Italian city-states like Florence and Venice grow wealthy on trade and patronize a revival of classical art and learning. Constantinople falls to the Ottomans in 1453, ending the Byzantine Empire and pushing Greek scholars west, while the Ming dynasty's Zheng He leads treasure fleets across the Indian Ocean to East Africa. Gutenberg's printing press, developed around 1450, begins spreading texts faster than any copyist could.",
+  },
+  {
+    year: 1490,
     title: "Age of exploration",
-    body: "Printing, gunpowder, and ocean-going ships let ideas, armies, and disease cross distances that once took generations. European voyages reach the Americas and pull Atlantic, African, and Asian economies into a single, often brutal, exchange.",
+    body: "Columbus reaches the Caribbean in 1492 under the Spanish crown, and Vasco da Gama sails around Africa to India in 1498, opening direct sea routes that remake global trade. The Ottoman Empire controls the eastern Mediterranean and much of the old Silk Road, pushing European states to seek routes by sea, while the Songhai Empire dominates trade across the Niger River in West Africa. Within decades, Spanish conquistadors topple the Aztec and Inca empires, and the Columbian Exchange begins moving crops, animals, and diseases between hemispheres.",
   },
   {
-    year: 1950,
-    title: "Modern",
-    body: "Steam power, then electricity and computing, repeatedly rewrite how people work, travel, and fight. Two world wars, decolonization, and a technological acceleration compress into a single century what earlier eras took a millennium to change.",
+    year: 1650,
+    title: "Revolutions",
+    body: "Isaac Newton and the Royal Society formalize a scientific method that reshapes how Europeans understand the natural world, while Enlightenment writers question monarchy and religious authority. Those ideas feed the American Declaration of Independence in 1776, the French Revolution in 1789, and the Haitian Revolution of 1791, the only successful slave revolt to found a state. Meanwhile Qing China and Mughal India remain the world's largest economies, largely untouched by these upheavals.",
+  },
+  {
+    year: 1800,
+    title: "Industrial age",
+    body: "Steam power and mechanized textile production, first concentrated in Britain, spread to continental Europe, the United States, and Japan, while railways and telegraphs shrink travel and communication times. European powers colonize most of Africa after the 1884 Berlin Conference and impose unequal treaties on China after the Opium Wars, even as Japan's 1868 Meiji Restoration rapidly industrializes it into a rival power. Mass migration moves tens of millions of people across oceans over the century.",
+  },
+  {
+    year: 1900,
+    title: "World wars",
+    body: "Assassination in Sarajevo triggers the First World War in 1914, drawing empires and their colonies into a conflict that kills some 20 million people and topples the Russian, Ottoman, Austro-Hungarian, and German empires. A second global war from 1939 to 1945 kills far more, including the Holocaust's six million Jewish victims, and ends with atomic bombs dropped on Hiroshima and Nagasaki. Independence movements gather strength throughout these decades, from India's Congress Party to Ghana's Kwame Nkrumah.",
+  },
+  {
+    year: 1946,
+    title: "Cold War",
+    body: "The United States and Soviet Union emerge as rival superpowers in the aftermath of the Second World War, dividing much of the world into competing blocs while fighting proxy conflicts in Korea, Vietnam, and Afghanistan rather than each other directly. Decolonization accelerates: India gains independence in 1947, and dozens of African nations follow through the 1950s and 60s, many joining the Non-Aligned Movement rather than choosing a side. The Space Race puts Sputnik in orbit in 1957 and American astronauts on the Moon in 1969, before the Berlin Wall falls in 1989.",
+  },
+  {
+    year: 1990,
+    title: "Digital age",
+    body: "The Soviet Union dissolves in 1991, and the World Wide Web, released to the public that same year, begins connecting computers worldwide into a single network. China's economic reforms and India's liberalization pull hundreds of millions out of poverty and shift manufacturing and technology work globally, while a 2008 financial crisis starting in American mortgage markets spreads worldwide within weeks. Smartphones, social media, and artificial intelligence reshape daily life and politics on every continent within a single generation.",
   },
 ];
 
@@ -155,6 +218,7 @@ function main(): void {
   const shards = writeShards(texts);
 
   const erasFile = writeHashed("eras", ".json", JSON.stringify(ERAS));
+  const landmarksFile = writeHashed("landmarks", ".json", JSON.stringify(LANDMARKS));
 
   const manifest: Manifest = {
     version: 1,
@@ -162,6 +226,7 @@ function main(): void {
     shardSize: SHARD_SIZE,
     columnarFile,
     erasFile,
+    landmarksFile,
     shards,
   };
   writeFileSync(path.join(OUT_DIR, "manifest.json"), JSON.stringify(manifest));

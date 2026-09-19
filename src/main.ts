@@ -5,7 +5,7 @@ import { eventIndex } from "./data";
 import { computeHistogram } from "./data/aggregate";
 import { T } from "./data/timescale";
 import { THEMES } from "./data/types";
-import { loadManifest, loadColumnarIndex, loadEras, eventsFromColumnar, createTextResolver } from "./data/loader";
+import { loadManifest, loadColumnarIndex, loadEras, loadLandmarks, eventsFromColumnar, createTextResolver } from "./data/loader";
 import {
   getState,
   setPos,
@@ -64,9 +64,10 @@ async function boot(): Promise<void> {
 
   await fontsReady;
   const manifest = await manifestPromise;
-  const [columnar, eras] = await Promise.all([
+  const [columnar, eras, landmarks] = await Promise.all([
     loadColumnarIndex(DATA_BASE, manifest),
     loadEras(DATA_BASE, manifest),
+    loadLandmarks(DATA_BASE, manifest),
   ]);
   const events = eventsFromColumnar(columnar);
   eventIndex.setEvents(events);
@@ -75,7 +76,7 @@ async function boot(): Promise<void> {
   const datasetMetaEl = document.getElementById("datasetMeta");
   if (datasetMetaEl) datasetMetaEl.textContent = `${manifest.totalEvents.toLocaleString()} events`;
 
-  renderNarrative(byId("eraList"), eras);
+  renderNarrative(byId("eraList"), eras, landmarks);
   const narrativeNav = document.querySelector<HTMLElement>(".narrative");
   if (narrativeNav) observeNarrative(narrativeNav);
 
@@ -83,8 +84,9 @@ async function boot(): Promise<void> {
   const cometRail = new CometRail(byIdCanvas("eraRail"));
   const eraRailWrap = byId("eraRailWrap");
   function measureCometRail(): void {
-    const eraEls = [...byId("eraList").querySelectorAll<HTMLElement>(".era-sec")];
-    cometRail.measure(eraRailWrap, eraEls);
+    // The rail routes through both era sections and landmark cards.
+    const anchorEls = [...byId("eraList").querySelectorAll<HTMLElement>(".era-sec, .landmark-card")];
+    cometRail.measure(eraRailWrap, anchorEls);
     markNarrativeDirty();
   }
   measureCometRail();

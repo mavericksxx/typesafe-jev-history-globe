@@ -178,6 +178,12 @@ h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; ma
 }
 .narrative-note { font-family: var(--mono); font-size: 10.5px; font-weight: 600; color: var(--ink-2); margin: 0; display: inline-block; text-shadow: var(--halo); }
 
+/* Landmark cards: small and quieter than an era-sec, scroll-linked to the
+   reel and the globe's camera the same way (see narrative/index.ts). */
+.landmark-card { scroll-margin-top: 50vh; margin: 0; font-size: 0.85rem; line-height: 1.4; color: var(--ink-2); text-shadow: var(--halo); }
+.landmark-year { font-family: var(--mono); font-weight: 600; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.landmark-title { font-family: var(--serif); color: var(--ink-2); }
+
 .stage { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 28px; align-items: start; }
 @media (max-width: 860px) { .stage { grid-template-columns: 1fr; } }
 

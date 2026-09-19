@@ -79,6 +79,21 @@ export interface RawEventRecord {
   minor: boolean;
 }
 
+/**
+ * A hand-curated landmark event shown as a small card in the narrative,
+ * between eras — a Phase 0 stopgap for what will eventually be real,
+ * Jev-scored events from the actual corpus. Deliberately a subset of
+ * HistoryEvent's core fields (year, lat, lon, text, top theme) so it's a
+ * drop-in match once that corpus exists.
+ */
+export interface LandmarkEvent {
+  year: number;
+  lat: number;
+  lon: number;
+  text: string;
+  top: Theme;
+}
+
 /** The aggregated "what's happening right now" snapshot the era panel shows. */
 export interface EraSnapshot {
   themes: Record<Theme, number>;

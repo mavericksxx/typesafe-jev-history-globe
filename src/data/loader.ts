@@ -3,7 +3,7 @@
 // module too) — no DOM.
 import { T } from "./timescale";
 import { THEMES, EXT_THEMES, REGIONS } from "./types";
-import type { HistoryEvent, LocKind, Theme, ExtTheme } from "./types";
+import type { HistoryEvent, LandmarkEvent, LocKind, Theme, ExtTheme } from "./types";
 
 export interface ManifestShard {
   file: string;
@@ -21,6 +21,8 @@ export interface Manifest {
   columnarFile: string;
   /** Content-hashed filename. */
   erasFile: string;
+  /** Content-hashed filename. */
+  landmarksFile: string;
   shards: ManifestShard[];
 }
 
@@ -65,6 +67,10 @@ export function loadColumnarIndex(baseUrl: string, manifest: Manifest): Promise<
 
 export function loadEras(baseUrl: string, manifest: Manifest): Promise<EraCopy[]> {
   return fetchJson<EraCopy[]>(`${baseUrl}/${manifest.erasFile}`);
+}
+
+export function loadLandmarks(baseUrl: string, manifest: Manifest): Promise<LandmarkEvent[]> {
+  return fetchJson<LandmarkEvent[]>(`${baseUrl}/${manifest.landmarksFile}`);
 }
 
 /** Build HistoryEvent[] from the columnar index. Text stays "" until a shard loads. */

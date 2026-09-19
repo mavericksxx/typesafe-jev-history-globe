@@ -209,8 +209,20 @@ export class Loop {
   private pendingFocusSince = 0;
 
   private updateFocusRotation(pos: number, now: number): void {
-    const f = findFocusEvent(pos);
     const state = getState();
+    // A landmark card centred in the narrative overrides the usual
+    // corpus-derived focus entirely: point the camera at its lat/lon so
+    // scrolling past a landmark actually "visits" it on the globe, and
+    // don't let findFocusEvent (searching the synthetic corpus, which knows
+    // nothing about these hand-curated events) fight it a moment later.
+    if (state.narrativeLandmark) {
+      const lm = state.narrativeLandmark;
+      const latClamped = Math.max(-35, Math.min(35, lm.lat * 0.6));
+      setTargetRotation([-lm.lon, -latClamped]);
+      this.pendingFocus = null;
+      return;
+    }
+    const f = findFocusEvent(pos);
     if (!f || f === state.focusEvent) {
       this.pendingFocus = null;
       return;

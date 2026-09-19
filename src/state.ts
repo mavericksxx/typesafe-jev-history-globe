@@ -1,6 +1,6 @@
 // The single AppState. No DOM here: renderers read this, input handlers
 // write through the setters below, and only loop.ts calls update/render.
-import type { HistoryEvent } from "./data/types";
+import type { HistoryEvent, LandmarkEvent } from "./data/types";
 import type { GalaxyId } from "./themes";
 import { DEFAULT_GALAXY_ID } from "./themes";
 
@@ -37,6 +37,10 @@ export interface AppState {
   pulses: Pulse[];
   /** Scroll-narrative easing target, in T-space; null when not scroll-driven. */
   narrativeTarget: number | null;
+  /** The landmark card currently centred in the narrative, if any — while
+   * set, the globe's camera targets its lat/lon directly instead of the
+   * usual corpus-derived focus event (see loop.ts#updateFocusRotation). */
+  narrativeLandmark: LandmarkEvent | null;
   calls: number;
   idx: number;
   readonly reducedMotion: boolean;
@@ -58,6 +62,7 @@ function initialState(): AppState {
     hoverEvent: null,
     pulses: [],
     narrativeTarget: null,
+    narrativeLandmark: null,
     calls: 0,
     idx: 0,
     reducedMotion:
@@ -150,6 +155,10 @@ export function prunePulses(now: number, maxAgeMs: number): void {
 
 export function setNarrativeTarget(target: number | null): void {
   state.narrativeTarget = target;
+}
+
+export function setNarrativeLandmark(landmark: LandmarkEvent | null): void {
+  state.narrativeLandmark = landmark;
 }
 
 export function setCalls(calls: number): void {
