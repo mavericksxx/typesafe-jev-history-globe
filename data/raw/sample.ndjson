@@ -1,0 +1,5 @@
+{"year":-2560,"text":"Great Pyramid of Giza completed","lat":29.98,"lon":31.13,"locKind":"point","th":{"war":0.02,"politics":0.7,"religion":0.8,"economy":0.4,"science":0.6,"culture":0.9},"impact":2.6,"real":false,"minor":false}
+{"year":1066,"text":"Battle of Hastings","lat":50.91,"lon":0.49,"locKind":"point","th":{"war":1,"politics":0.99,"religion":0.48,"economy":0.1,"science":0.19,"culture":0.44},"impact":2.59,"real":true,"minor":false}
+{"year":1517,"text":"Luther's Ninety-five Theses","lat":51.87,"lon":12.64,"locKind":"point","th":{"war":0.03,"politics":0.52,"religion":0.99,"economy":0.84,"science":0.05,"culture":0.98},"impact":2.96,"real":true,"minor":false}
+{"year":1929,"text":"Wall Street crash","lat":40.71,"lon":-74.01,"locKind":"point","th":{"war":0.02,"politics":0.46,"religion":0.02,"economy":0.99,"science":0.09,"culture":0.14},"impact":3,"real":true,"minor":false}
+{"year":2022,"text":"ChatGPT released","lat":37.77,"lon":-122.42,"locKind":"point","th":{"war":0.01,"politics":0.3,"religion":0.05,"economy":0.8,"science":0.99,"culture":0.7},"impact":2.7,"real":false,"minor":false}
