@@ -1,6 +1,10 @@
 // Reads data/raw/events.ndjson and writes the public/data/ bundle the app
-// fetches at runtime: manifest.json, a columnar index, ~2k-event text
-// shards, and eras.json.
+// fetches at runtime: manifest.json (short-lived), a content-hashed columnar
+// index, content-hashed ~2k-event text shards, and a content-hashed
+// eras.json. Only manifest.json keeps a stable name — everything else it
+// references can be cached immutably forever because its filename changes
+// whenever its content does.
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,10 +22,20 @@ const SHARD_SIZE = 2000;
 
 const LOC_KIND_CODE: Record<LocKind, number> = { point: 0, country: 1, none: 2 };
 
-/** Keeps the columnar JSON small: 3 decimal places is well past the visual
+/** Keeps the columnar JSON small: 2 decimal places is well past the visual
  * precision a pixel-art globe needs for any of these fields. */
-function round3(v: number): number {
-  return Math.round(v * 1000) / 1000;
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+
+/** Writes `content` under a content-hashed filename (`<base>.<hash><ext>`)
+ * and returns that filename, so the manifest can reference it and callers
+ * can cache it immutably forever. */
+function writeHashed(base: string, ext: string, content: string): string {
+  const hash = createHash("sha1").update(content).digest("hex").slice(0, 10);
+  const file = `${base}.${hash}${ext}`;
+  writeFileSync(path.join(OUT_DIR, file), content);
+  return file;
 }
 
 // Static narrative copy for the five scroll eras (see PLAN.md / reel.html's
@@ -91,16 +105,16 @@ function buildColumnar(records: RawEventRecord[]): { columnar: ColumnarIndex; te
     const conf = Math.max(0.15, Math.min(0.99, (r.real ? 0.82 : 0.55) + (rng() - 0.5) * 0.3));
 
     columnar.year.push(r.year);
-    columnar.lat.push(round3(r.lat));
-    columnar.lon.push(round3(r.lon));
+    columnar.lat.push(round2(r.lat));
+    columnar.lon.push(round2(r.lon));
     columnar.locKind.push(LOC_KIND_CODE[r.locKind]);
     columnar.region.push(REGIONS.indexOf(region));
-    columnar.impact.push(round3(r.impact));
-    columnar.conf.push(round3(conf));
+    columnar.impact.push(round2(r.impact));
+    columnar.conf.push(round2(conf));
     columnar.real.push(r.real ? 1 : 0);
     columnar.minor.push(r.minor ? 1 : 0);
-    for (const t of THEMES) columnar.th[t]!.push(round3(r.th[t]));
-    for (const t of EXT_THEMES) columnar.ext[t]!.push(round3(ext[t]));
+    for (const t of THEMES) columnar.th[t]!.push(round2(r.th[t]));
+    for (const t of EXT_THEMES) columnar.ext[t]!.push(round2(ext[t]));
     texts.push(r.text);
   }
   return { columnar, texts };
@@ -112,10 +126,12 @@ function writeShards(texts: string[]): ManifestShard[] {
   const shards: ManifestShard[] = [];
   for (let start = 0; start < texts.length; start += SHARD_SIZE) {
     const end = Math.min(texts.length, start + SHARD_SIZE);
-    const file = `shards/shard-${String(start).padStart(6, "0")}.json`;
     const shardMap: Record<number, string> = {};
     for (let i = start; i < end; i++) shardMap[i] = texts[i]!;
-    writeFileSync(path.join(OUT_DIR, file), JSON.stringify(shardMap));
+    const content = JSON.stringify(shardMap);
+    const hash = createHash("sha1").update(content).digest("hex").slice(0, 10);
+    const file = `shards/shard-${String(start).padStart(6, "0")}.${hash}.json`;
+    writeFileSync(path.join(OUT_DIR, file), content);
     shards.push({ file, start, end });
   }
   return shards;
@@ -124,28 +140,31 @@ function writeShards(texts: string[]): ManifestShard[] {
 function main(): void {
   const records = readRaw();
   // Sort by year up front so index positions are already time-ordered; the
-  // app's EventIndex re-sorts by T(year) at load time regardless.
+  // app's EventIndex re-sorts by T(year) at load time regardless. This sort
+  // plus the seeded RNGs below make the whole build byte-for-byte
+  // deterministic — no timestamps or other per-run churn anywhere in the
+  // output, so a re-run with unchanged input produces identical files.
   records.sort((a, b) => a.year - b.year);
 
   rmSync(OUT_DIR, { recursive: true, force: true });
   mkdirSync(OUT_DIR, { recursive: true });
 
   const { columnar, texts } = buildColumnar(records);
-  writeFileSync(path.join(OUT_DIR, "index.json"), JSON.stringify(columnar));
+  const columnarFile = writeHashed("index", ".json", JSON.stringify(columnar));
 
   const shards = writeShards(texts);
+
+  const erasFile = writeHashed("eras", ".json", JSON.stringify(ERAS));
 
   const manifest: Manifest = {
     version: 1,
     totalEvents: records.length,
     shardSize: SHARD_SIZE,
-    columnarFile: "index.json",
-    erasFile: "eras.json",
+    columnarFile,
+    erasFile,
     shards,
-    generatedAt: new Date().toISOString(),
   };
   writeFileSync(path.join(OUT_DIR, "manifest.json"), JSON.stringify(manifest));
-  writeFileSync(path.join(OUT_DIR, "eras.json"), JSON.stringify(ERAS));
 
   console.log(`built public/data/: ${records.length} events, ${shards.length} shards`);
 }

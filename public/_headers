@@ -2,12 +2,21 @@
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
-# Data shards and the columnar index are content-addressed by index range and
-# don't change after a build, so they're safe to cache hard too.
-/data/*
+# Content-hashed data files (index.<hash>.json, eras.<hash>.json) — the
+# filename changes whenever the content does, so these are safe to cache
+# immutably forever. Scoped narrowly (not /data/*) so this never overlaps
+# with the manifest.json rule below.
+/data/index.*.json
   Cache-Control: public, max-age=31536000, immutable
 
-# manifest.json is the one file that can change between deploys without a
-# filename change (new shard list, new totalEvents) — keep it short-lived.
+/data/eras.*.json
+  Cache-Control: public, max-age=31536000, immutable
+
+/data/shards/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# manifest.json is the one file that keeps a stable name across deploys (it
+# points at that deploy's hashed files), so it needs a short, revalidated
+# cache instead.
 /data/manifest.json
   Cache-Control: public, max-age=300, must-revalidate

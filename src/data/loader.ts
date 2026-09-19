@@ -17,10 +17,11 @@ export interface Manifest {
   version: number;
   totalEvents: number;
   shardSize: number;
+  /** Content-hashed filename (e.g. "index.9f2a1c0e3b.json") — immutable-cacheable. */
   columnarFile: string;
+  /** Content-hashed filename. */
   erasFile: string;
   shards: ManifestShard[];
-  generatedAt: string;
 }
 
 /** Structure-of-arrays: one array per field, one entry per event, in index order. */
@@ -116,6 +117,9 @@ export async function loadTextFor(
   let pending = shardCache.get(shard.start);
   if (!pending) {
     pending = fetchJson<Record<number, string>>(`${baseUrl}/${shard.file}`);
+    // Evict on failure so a transient network blip doesn't permanently
+    // poison every future request for this shard.
+    pending.catch(() => shardCache.delete(shard.start));
     shardCache.set(shard.start, pending);
   }
   const texts = await pending;
