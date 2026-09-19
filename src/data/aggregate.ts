@@ -29,11 +29,14 @@ function zeroRegionRecord(): Record<Region, number> {
 
 /**
  * Aggregate a window of events into the era snapshot the panel bars show.
- * `windowEvents` should be `eventIndex.range(pos - ERA_WINDOW, pos)` — this
- * function does no filtering or index lookups of its own.
+ * `start`/`end` should be `eventIndex.range(pos - ERA_WINDOW, pos)` — this
+ * iterates `all` in place between them and does no filtering, index lookups,
+ * or slicing of its own.
  */
 export function computeEraSnapshot(
-  windowEvents: readonly HistoryEvent[],
+  all: readonly HistoryEvent[],
+  start: number,
+  end: number,
   pos: number,
   lo: number
 ): EraSnapshot {
@@ -42,8 +45,11 @@ export function computeEraSnapshot(
   const region = zeroRegionRecord();
   let wsum = 0;
   let imp = 0;
+  let n = 0;
 
-  for (const e of windowEvents) {
+  for (let i = start; i < end; i++) {
+    const e = all[i]!;
+    n++;
     const w = (e.minor ? 0.4 : 1) * (1 - ((pos - e.t) / ERA_WINDOW) * 0.6);
     wsum += w;
     imp += e.impact * w;
@@ -73,7 +79,7 @@ export function computeEraSnapshot(
     region: regionRel,
     mood,
     impact: wsum ? imp / wsum : 0,
-    n: windowEvents.length,
+    n,
     lo,
   };
 }

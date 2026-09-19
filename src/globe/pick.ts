@@ -6,9 +6,13 @@ import type { HistoryEvent } from "../data/types";
 
 const MAX_PICK_DISTANCE_PX = 10;
 
-/** `events` should be the same windowed slice the globe is currently drawing. */
+/** `[start, end)` should be the same bounded window `Globe.draw` is
+ * currently drawing dots for (see boundDotWindow) — iterated over `all` in
+ * place, no slice. */
 export function pickNearest(
-  events: readonly HistoryEvent[],
+  all: readonly HistoryEvent[],
+  start: number,
+  end: number,
   projection: GeoProjection,
   mx: number,
   my: number
@@ -17,7 +21,8 @@ export function pickNearest(
   const center: [number, number] = [-r[0], -r[1]];
   let best: HistoryEvent | null = null;
   let bestDist = MAX_PICK_DISTANCE_PX;
-  for (const e of events) {
+  for (let i = start; i < end; i++) {
+    const e = all[i]!;
     if (e.locKind === "none") continue;
     if (geoDistance([e.lon, e.lat], center) > 1.52) continue;
     const p = projection([e.lon, e.lat]);

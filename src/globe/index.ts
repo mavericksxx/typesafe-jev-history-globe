@@ -5,9 +5,9 @@
 import type { GeoProjection, GeoPath } from "d3-geo";
 import { createProjection, fitProjection, graticule } from "./projection";
 import { land } from "./land";
-import { drawDots, drawPulses, makeProjector } from "./dots";
+import { prepareDots, paintDots, drawPulses, makeProjector } from "./dots";
 import type { Pulse, Project } from "./dots";
-import { DensityLayer } from "./density";
+import { DensityGrid, prepareDensityCells, paintDensityCells } from "./density";
 import { THEME_COLORS } from "../themes";
 import type { GalaxyTheme } from "../themes";
 import { THEMES } from "../data/types";
@@ -23,8 +23,13 @@ export interface GlobeDrawOptions {
   accent: string;
   rot: [number, number];
   pos: number;
-  /** Pre-bisected `[pos - DOT_FADE_WINDOW, pos]` slice — never the full dataset. */
-  windowedEvents: readonly HistoryEvent[];
+  /** The full sorted index, iterated in place — never copied per frame. */
+  all: readonly HistoryEvent[];
+  /** Bisected + count-bounded `[start, end)` window of `all` to draw as crisp dots. */
+  dotStart: number;
+  dotEnd: number;
+  /** `eventIndex.countUpTo(pos)` — how far the persistent density grid should be synced. */
+  densityIdx: number;
   pulses: readonly Pulse[];
   now: number;
 }
@@ -34,7 +39,7 @@ export class Globe {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly projection: GeoProjection;
   private readonly path: GeoPath;
-  private readonly density = new DensityLayer();
+  private readonly density = new DensityGrid();
   private readonly underlay: HTMLCanvasElement;
   private readonly underlayCtx: CanvasRenderingContext2D;
   private readonly overlay: HTMLCanvasElement;
@@ -79,7 +84,6 @@ export class Globe {
     this.overlay.width = px;
     this.overlay.height = px;
     fitProjection(this.projection, cssSize);
-    this.density.resize(px, px, dpr);
     this.staticCacheKey = "";
   }
 
@@ -147,7 +151,7 @@ export class Globe {
       o.lineWidth = (major ? 1.2 : 0.7) * this.dpr;
       o.stroke();
     }
-    o.font = `${Math.max(7, r * 0.026)}px "IBM Plex Mono",monospace`;
+    o.font = `${Math.max(7 * this.dpr, r * 0.026)}px "IBM Plex Mono",monospace`;
     o.fillStyle = hexToRgba(theme.bezel, 0.75);
     o.textAlign = "center";
     o.textBaseline = "middle";
@@ -198,25 +202,22 @@ export class Globe {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(this.overlay, 0, 0);
 
-    // 4) persistent density layer (additive, slow decay)
-    this.density.step(opts.windowedEvents, project, DOT_COLORS);
-    ctx.drawImage(this.density.element, 0, 0);
+    // 4) persistent density grid (rotation-correct: it projects like
+    // everything else, so it doesn't smear across the screen as the globe turns)
+    this.density.syncTo(opts.all, opts.densityIdx);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    const cellPx = Math.max(3, (this.projection.scale() * 2 * Math.PI) / 36 / 6);
+    const densityCells = prepareDensityCells(this.density, project, cellPx);
+    paintDensityCells(ctx, densityCells, DOT_COLORS);
 
     // 5) live windowed dots + pulses, drawn last so they sit above the glow
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    drawDots({
-      ctx,
-      events: opts.windowedEvents,
-      pos: opts.pos,
-      project,
-      colors: DOT_COLORS,
-      accent: opts.accent,
-    });
+    const dots = prepareDots(opts.all, opts.dotStart, opts.dotEnd, opts.pos, project);
+    paintDots(ctx, dots, DOT_COLORS, opts.accent);
     drawPulses(ctx, opts.pulses, opts.now, project, DOT_COLORS);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 }
 
-export { DOT_FADE_WINDOW } from "./dots";
+export { DOT_FADE_WINDOW, MAX_VISIBLE_DOTS, boundDotWindow } from "./dots";
 export { pickNearest } from "./pick";

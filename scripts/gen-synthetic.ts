@@ -70,7 +70,9 @@ function themeVector(rng: () => number, lead: Theme): Record<Theme, number> {
   ) as Record<Theme, number>;
 }
 
-function generateSynthetic(count: number): RawEventRecord[] {
+/** Exported so tests/perf.test.ts can bench against the exact same
+ * distribution the real 50k dataset uses, deterministically (fixed seed). */
+export function generateSynthetic(count: number): RawEventRecord[] {
   const rng = mulberry32(1_234_567);
   const out: RawEventRecord[] = [];
   for (let i = 0; i < count; i++) {
@@ -106,4 +108,9 @@ function main(): void {
   console.log(`wrote ${records.length} events to ${path.relative(REPO_ROOT, OUT)}`);
 }
 
-main();
+// Only run as a CLI, not on import (tests/perf.test.ts imports
+// generateSynthetic without wanting a side-effecting overwrite of
+// data/raw/events.ndjson).
+if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file://").href) {
+  main();
+}

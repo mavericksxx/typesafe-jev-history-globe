@@ -1,81 +1,128 @@
-// A persistent, low-cost density layer: an offscreen canvas that never
-// fully clears, only decays, so places/eras with lots of dots leave a soft
-// additive glow behind — the "history accumulating" cue from PLAN.md, on
-// top of the windowed dots in dots.ts.
+// The "history accumulating" density cue, as a fixed-size lat/lon cell grid
+// instead of a screen-space canvas trail. A screen-space additive trail
+// doesn't rotate with the globe and decays in under half a second regardless
+// of playback speed; a grid keyed by geography is rotation-correct (it
+// projects like everything else on the globe) and represents genuine
+// accumulation — a cell's count only grows as `pos` passes more events in
+// it, updated incrementally (only the delta since last frame is touched,
+// never a rebuild) unless the position jumps backward past what's accumulated.
 import { THEMES } from "../data/types";
 import type { HistoryEvent, Theme } from "../data/types";
 import type { Project } from "./dots";
 
-/** Per-frame multiplicative decay applied via a `destination-out` wash. */
-export const DENSITY_DECAY = 0.03;
-const STAMP_RADIUS = 1.1;
-const STAMP_ALPHA = 0.05;
+const LON_CELLS = 36; // 10° per cell
+const LAT_CELLS = 18; // 10° per cell
+const THEME_COUNT = THEMES.length;
+const THEME_SLOT: Record<Theme, number> = Object.fromEntries(THEMES.map((t, i) => [t, i])) as Record<Theme, number>;
 
-export class DensityLayer {
-  private readonly canvas: HTMLCanvasElement;
-  private readonly ctx: CanvasRenderingContext2D;
-  private w = 0;
-  private h = 0;
-  private dpr = 1;
+function cellIndex(lon: number, lat: number): number {
+  const lonBucket = Math.min(LON_CELLS - 1, Math.max(0, Math.floor(((lon + 180) / 360) * LON_CELLS)));
+  const latBucket = Math.min(LAT_CELLS - 1, Math.max(0, Math.floor(((90 - lat) / 180) * LAT_CELLS)));
+  return latBucket * LON_CELLS + lonBucket;
+}
 
-  constructor() {
-    this.canvas = document.createElement("canvas");
-    const ctx = this.canvas.getContext("2d");
-    if (!ctx) throw new Error("DensityLayer: 2d context unavailable");
-    this.ctx = ctx;
+function cellCenter(cell: number): [lon: number, lat: number] {
+  const lonBucket = cell % LON_CELLS;
+  const latBucket = Math.floor(cell / LON_CELLS);
+  const lon = (lonBucket + 0.5) * (360 / LON_CELLS) - 180;
+  const lat = 90 - (latBucket + 0.5) * (180 / LAT_CELLS);
+  return [lon, lat];
+}
+
+/** Accumulated per-cell, per-theme counts of events with t <= the position
+ * last synced to. Incrementally maintained: `syncTo` only touches the
+ * events between the old and new position, in either direction. */
+export class DensityGrid {
+  private readonly counts = new Float32Array(LON_CELLS * LAT_CELLS * THEME_COUNT);
+  private idx = 0;
+
+  /** Number of events currently folded into the grid (i.e. `all[0..idx)`). */
+  get syncedIndex(): number {
+    return this.idx;
   }
 
-  get element(): HTMLCanvasElement {
-    return this.canvas;
+  reset(): void {
+    this.counts.fill(0);
+    this.idx = 0;
   }
 
-  /** `w`/`h` are device pixels; `dpr` lets `step` stamp using the same
-   * CSS-unit projected coordinates the live dot layer uses. */
-  resize(w: number, h: number, dpr: number): void {
-    this.dpr = dpr;
-    if (this.w === w && this.h === h) return;
-    this.w = w;
-    this.h = h;
-    this.canvas.width = w;
-    this.canvas.height = h;
+  private add(e: HistoryEvent, delta: number): void {
+    if (e.locKind === "none") return;
+    const cell = cellIndex(e.lon, e.lat);
+    const i = cell * THEME_COUNT + THEME_SLOT[e.top];
+    this.counts[i] = this.counts[i]! + delta;
   }
 
-  private decay(): void {
-    const { ctx, w, h } = this;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.fillStyle = `rgba(0,0,0,${DENSITY_DECAY})`;
-    ctx.fillRect(0, 0, w, h);
-    ctx.globalCompositeOperation = "source-over";
-  }
-
-  /** Decays the buffer, then additively stamps the current windowed slice
-   * (in the same CSS-unit coordinates `project` returns), one fill pass per
-   * theme colour so it stays cheap at scale. */
-  step(events: readonly HistoryEvent[], project: Project, colors: Record<Theme, string>): void {
-    this.decay();
-    const { ctx } = this;
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = STAMP_ALPHA;
-    for (const theme of THEMES) {
-      ctx.fillStyle = colors[theme];
-      let started = false;
-      for (const e of events) {
-        if (e.top !== theme || e.locKind === "none") continue;
-        const p = project(e.lon, e.lat);
-        if (!p) continue;
-        if (!started) {
-          ctx.beginPath();
-          started = true;
-        }
-        ctx.moveTo(p[0] + STAMP_RADIUS, p[1]);
-        ctx.arc(p[0], p[1], STAMP_RADIUS, 0, Math.PI * 2);
-      }
-      if (started) ctx.fill();
+  /** Brings the grid to represent exactly `all[0..targetIdx)`. */
+  syncTo(all: readonly HistoryEvent[], targetIdx: number): void {
+    if (targetIdx > this.idx) {
+      for (let i = this.idx; i < targetIdx; i++) this.add(all[i]!, 1);
+    } else if (targetIdx < this.idx) {
+      for (let i = targetIdx; i < this.idx; i++) this.add(all[i]!, -1);
     }
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.idx = targetIdx;
   }
+
+  /** Read-only view of the raw per-cell, per-theme counts, for prepareDensityCells. */
+  snapshotCounts(): Readonly<Float32Array> {
+    return this.counts;
+  }
+}
+
+export interface DensityCell {
+  x: number;
+  y: number;
+  size: number;
+  theme: Theme;
+  alpha: number;
+}
+
+/** Pure prep pass over the fixed cell grid (LON_CELLS*LAT_CELLS = 648 cells
+ * regardless of dataset size) — cheap enough to run every frame, and safe to
+ * call from Node for the perf test. */
+export function prepareDensityCells(grid: DensityGrid, project: Project, cellPixelSize: number): DensityCell[] {
+  const out: DensityCell[] = [];
+  const snapshot = grid.snapshotCounts();
+  let max = 1;
+  for (const v of snapshot) if (v > max) max = v;
+  for (let cell = 0; cell < LON_CELLS * LAT_CELLS; cell++) {
+    let cellMax = 0;
+    let dominant: Theme = THEMES[0]!;
+    for (const t of THEMES) {
+      const v = snapshot[cell * THEME_COUNT + THEME_SLOT[t]]!;
+      if (v > cellMax) {
+        cellMax = v;
+        dominant = t;
+      }
+    }
+    if (cellMax <= 0) continue;
+    const [lon, lat] = cellCenter(cell);
+    const p = project(lon, lat);
+    if (!p) continue;
+    const alpha = Math.min(0.5, 0.06 + 0.44 * (cellMax / max));
+    out.push({ x: p[0], y: p[1], size: cellPixelSize, theme: dominant, alpha });
+  }
+  return out;
+}
+
+export function paintDensityCells(ctx: CanvasRenderingContext2D, cells: readonly DensityCell[], colors: Record<Theme, string>): void {
+  const groups = new Map<Theme, DensityCell[]>();
+  for (const c of cells) {
+    let arr = groups.get(c.theme);
+    if (!arr) {
+      arr = [];
+      groups.set(c.theme, arr);
+    }
+    arr.push(c);
+  }
+  ctx.globalCompositeOperation = "lighter";
+  for (const [theme, group] of groups) {
+    ctx.fillStyle = colors[theme];
+    for (const c of group) {
+      ctx.globalAlpha = c.alpha;
+      ctx.fillRect(c.x - c.size / 2, c.y - c.size / 2, c.size, c.size);
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
 }

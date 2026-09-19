@@ -59,18 +59,22 @@ describe("EventIndex", () => {
     expect(index.countUpTo(2)).toBe(YEARS.length);
   });
 
-  it("range returns exactly the events within [lo, hi]", () => {
-    const slice = index.range(T(500), T(1900));
-    expect(slice.map((e) => e.year)).toEqual([500, 1000, 1500, 1750, 1900]);
+  it("range returns [start, end) indices covering exactly [lo, hi]", () => {
+    const all = index.all();
+    const [start, end] = index.range(T(500), T(1900));
+    expect(all.slice(start, end).map((e) => e.year)).toEqual([500, 1000, 1500, 1750, 1900]);
   });
 
-  it("range is empty when hi < lo", () => {
-    expect(index.range(T(1900), T(500))).toEqual([]);
+  it("range is empty ([n, n)) when hi < lo", () => {
+    const [start, end] = index.range(T(1900), T(500));
+    expect(end - start).toBe(0);
   });
 
   it("range with an out-of-domain window still clamps sensibly", () => {
-    expect(index.range(-1, 2).length).toBe(YEARS.length);
-    expect(index.range(1.5, 2)).toEqual([]);
+    const [s1, e1] = index.range(-1, 2);
+    expect(e1 - s1).toBe(YEARS.length);
+    const [s2, e2] = index.range(1.5, 2);
+    expect(e2 - s2).toBe(0);
   });
 
   it("upperBound/lowerBound agree with a manual scan (oracle check)", () => {

@@ -40,13 +40,23 @@ export class EventIndex {
     return this.upperBound(t);
   }
 
-  /** Events with lo <= t <= hi. Cost is O(log n + k) for k matches, not O(n). */
-  range(lo: number, hi: number): HistoryEvent[] {
-    if (hi < lo) return [];
-    const start = this.lowerBound(lo);
-    const end = this.upperBound(hi);
-    return this.events.slice(start, end);
+  /**
+   * `[start, end)` indices into `all()` covering events with `lo <= t <= hi`.
+   * Returns indices, not a copy — callers iterate `all()` between them
+   * directly (`for (let i = start; i < end; i++)`), so a windowed query
+   * never allocates a slice of a 50k-event array on every frame.
+   */
+  range(lo: number, hi: number): [start: number, end: number] {
+    if (hi < lo) return [0, 0];
+    return [this.lowerBound(lo), this.upperBound(hi)];
   }
 }
 
 export const eventIndex = new EventIndex();
+
+/** Clamps a `[start, end)` window to its most recent `max` entries — for any
+ * per-frame window (dot draw, era snapshot) whose bisected width can blow up
+ * in a dense era regardless of how narrow the underlying T-space window is. */
+export function boundToMostRecent(start: number, end: number, max: number): [start: number, end: number] {
+  return [Math.max(start, end - max), end];
+}

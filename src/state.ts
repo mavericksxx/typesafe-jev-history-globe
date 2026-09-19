@@ -83,9 +83,16 @@ export function setSpeed(speed: number): void {
   state.speed = speed;
 }
 
+/** No-ops (and doesn't mark the globe dirty) if rot/target are unchanged —
+ * matters most under reduced motion, where easeRotation would otherwise
+ * call this every frame even once rot has already settled on target. */
 export function setRotation(rot: [number, number], target?: [number, number]): void {
+  const t = target ?? state.targetRot;
+  const unchanged =
+    rot[0] === state.rot[0] && rot[1] === state.rot[1] && t[0] === state.targetRot[0] && t[1] === state.targetRot[1];
+  if (unchanged) return;
   state.rot = rot;
-  state.targetRot = target ?? state.targetRot;
+  state.targetRot = t;
   state.dirty.globe = true;
 }
 
@@ -119,8 +126,13 @@ export function setFocusEvent(event: HistoryEvent | null): void {
   state.focusEvent = event;
 }
 
+/** Caps at MAX_PULSES (oldest dropped first) so a fast scrub through a dense
+ * era can't grow the live pulse list without bound. */
+export const MAX_PULSES = 300;
+
 export function pushPulse(event: HistoryEvent, t: number): void {
   state.pulses.push({ event, t });
+  if (state.pulses.length > MAX_PULSES) state.pulses.splice(0, state.pulses.length - MAX_PULSES);
   state.dirty.globe = true;
 }
 

@@ -17,8 +17,9 @@ import {
   setAccent,
   setHoverEvent,
   setNarrativeTarget,
+  markAllDirty,
 } from "./state";
-import { Globe, pickNearest, DOT_FADE_WINDOW } from "./globe";
+import { Globe, pickNearest, DOT_FADE_WINDOW, boundDotWindow } from "./globe";
 import { Timeline, TL_COLS } from "./timeline";
 import { GalaxyBackdrop } from "./galaxy/backdrop";
 import { EraPanel } from "./panel/era";
@@ -54,9 +55,13 @@ function byIdCanvas(id: string): HTMLCanvasElement {
 
 async function boot(): Promise<void> {
   injectThemeColorVars();
-  await document.fonts.ready;
+  // Kick the manifest fetch off immediately, in parallel with font loading
+  // — don't make the network wait behind `fonts.ready`.
+  const fontsReady = document.fonts.ready;
+  const manifestPromise = loadManifest(DATA_BASE);
 
-  const manifest = await loadManifest(DATA_BASE);
+  await fontsReady;
+  const manifest = await manifestPromise;
   const [columnar, eras] = await Promise.all([
     loadColumnarIndex(DATA_BASE, manifest),
     loadEras(DATA_BASE, manifest),
@@ -225,6 +230,14 @@ async function boot(): Promise<void> {
 
   const stream = new EventStream(byId("stream"));
 
+  const playBtn = byId("play") as HTMLButtonElement;
+  function setPlayLabel(): void {
+    const state = getState();
+    const label = state.playing ? "Pause" : state.pos >= 1 ? "Replay" : "Play";
+    playBtn.textContent = label;
+    playBtn.setAttribute("aria-label", label);
+  }
+
   const loop = new Loop({
     globe,
     timeline,
@@ -240,6 +253,9 @@ async function boot(): Promise<void> {
       sTheme: byId("sTheme"),
     },
     ensureText,
+    // Playback can stop itself on reaching the end (not just via the Pause
+    // click), so the button label needs updating either way.
+    onPlaybackEnd: setPlayLabel,
   });
 
   function resize(): void {
@@ -247,18 +263,14 @@ async function boot(): Promise<void> {
     globe.resize(globeBox.clientWidth, dpr);
     timeline.resize(dpr);
     galaxyBackdrop.resize(window.innerWidth, window.innerHeight);
+    // Both canvases just got resized (and cleared) — force a repaint even
+    // though pos/rot/accent haven't changed.
+    markAllDirty();
   }
   window.addEventListener("resize", resize);
   resize();
 
   // ---------- playback controls ----------
-  const playBtn = byId("play") as HTMLButtonElement;
-  function setPlayLabel(): void {
-    const state = getState();
-    const label = state.playing ? "Pause" : state.pos >= 1 ? "Replay" : "Play";
-    playBtn.textContent = label;
-    playBtn.setAttribute("aria-label", label);
-  }
   playBtn.addEventListener("click", () => {
     setNarrativeTarget(null);
     if (getState().pos >= 1) {
@@ -337,8 +349,10 @@ async function boot(): Promise<void> {
     }
     hoverEl.style.left = `${Math.min(globeCanvas.clientWidth - 250, mx + 12)}px`;
     hoverEl.style.top = `${my + 12}px`;
-    const dotEvents = eventIndex.range(state.pos - DOT_FADE_WINDOW, state.pos);
-    setHoverEvent(pickNearest(dotEvents, globe.projectionRef, mx, my));
+    const all = eventIndex.all();
+    const [windowStart, windowEnd] = eventIndex.range(state.pos - DOT_FADE_WINDOW, state.pos);
+    const [dotStart, dotEnd] = boundDotWindow(windowStart, windowEnd);
+    setHoverEvent(pickNearest(all, dotStart, dotEnd, globe.projectionRef, mx, my));
   });
   globeCanvas.addEventListener("pointerleave", () => setHoverEvent(null));
 
