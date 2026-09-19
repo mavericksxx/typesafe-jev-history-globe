@@ -1,84 +1,135 @@
-# Jev History Globe
+# epochs — plan
 
-A spinning 3D globe with a time slider. Scrub from 3000 BC to today and watch ~50k historical events light up by type: wars flare, science clusters, empires rise and fall. Jev tags every event once; the visuals replay for free forever.
+## What this is
 
-## Why Jev
+A pixel-art galaxy history globe: scrub from 3000 BC to today and watch
+historical events light up on a spinning globe rendered like a starfield.
+Every event is tagged against "the Jev" — a set of theme scores (war,
+politics, religion, economy, science, culture), an impact level, and a
+confidence — and that tagging drives the dot's colour and how strongly it
+reads on screen.
 
-- **Typed tags with confidence** for every event, not free-text summaries.
-- **Cheap enough for a whole corpus:** ~50k events × ~460 tokens ≈ 23M tokens ≈ **$1** (measured; output tokens are free) at $42 per billion input tokens.
-- **Confidence becomes part of the look:** low-confidence tags glow dimmer.
+This document describes the app as it actually exists in the repo today,
+not as originally envisioned. (An earlier version of this plan described a
+different visual direction — a cream/navy "printed atlas" look with an
+essay-and-globe layout and a live "type an event" demo backed by a
+Cloudflare Worker. That direction was superseded; see "Design direction"
+below for what shipped instead. The live-Jev-call demo does not currently
+exist in the app — `src/live/judge.ts` is the only remnant of it and is not
+wired into the UI.)
 
-## Pipeline
+## Architecture
 
-1. **Collect events.** Wikipedia year pages ("1905", "1066 BC", …) list events as one-line bullets. Parse them into `{year, text, linked_articles}`.
-2. **Locate them.** Look up linked articles in Wikidata to get coordinates (place, country, battle site). Drop events with no location, or pin them to the country's centroid.
-3. **Tag with Jev.** One call per event (batched if the API supports it):
-   Composite scoring, validated in `scripts/probe-composite.mjs`:
-   - six Noul theme questions (war, politics, religion, economy, science, culture), each 0–1
-   - an `impact` Score with four levels (local → changed world history)
-   - a `country` Choice (≤255 options) for placing the event when there's no coordinate
-   The dot colour comes from the highest-scoring theme. Every answer includes all its probabilities, and those drive the bars.
-   Keep the raw response next to each event. Never call Jev again for an event that's already tagged.
-4. **Save** everything to `events.json` (or SQLite). This is the only step that costs money.
-5. **Render.** A static web app with a d3-geo orthographic globe (see Design):
-   - Globe with a dot per event, colored by category, sized by scale
-   - Opacity set by Jev's confidence
-   - Time slider with play/pause and speed control; events fade in and out as time passes
-   - Category filters and a hover card with the event text, tag and confidence
-   - Optional: density heatmap mode, "follow a category" mode
+**Stack.** Vite + strict vanilla TypeScript, ESM throughout. No framework —
+DOM and canvas are driven directly. Runtime dependencies are `d3-geo`
+(projection), `d3-scale`, `d3-array` (bisection), and `topojson-client`
+(land geometry). Tests run on `vitest`; data-build and synthetic-data
+scripts run on `tsx`. `npm run typecheck` runs `tsc --noEmit`.
 
-## Design: AI 2040 look
+**State and render loop.** `src/state.ts` holds the single `AppState` object
+(position in T-space, playing/speed, rotation, focus/hover event, pulses,
+narrative-scroll target, galaxy theme, dirty flags) plus a set of setter
+functions — nothing else is allowed to mutate state directly. `src/loop.ts`
+is the single `requestAnimationFrame` loop: every frame it re-derives what
+should be visible from `pos`, then only repaints the globe canvas, the
+timeline canvas, or the narrative comet rail if their respective dirty flag
+(`DirtyFlags.globe` / `.timeline` / `.narrative`) is set.
 
-Reference: https://ai-2040.com/ (teardown in `project-builder-ai-agent/docs/ai-2040-design-inspo.md`). Printed-atlas look, not a glowing sci-fi globe.
+**Event querying.** `src/data/index.ts` builds an `EventIndex` over the
+(time-sorted) event array and uses `d3-array`'s `bisector` to turn "what's
+visible at this position" into a `[start, end)` range lookup — no scan or
+filter over the full event list happens per frame. Two windows are pulled
+from that index each frame:
+- **Dot window** (`src/globe/dots.ts`): the bisected range is bounded to the
+  most recent `MAX_VISIBLE_DOTS = 3000` events before being drawn.
+- **Era window** (`src/data/aggregate.ts`, `ERA_WINDOW = 4000`): a wider
+  window used to compute the "what's dominant right now" era snapshot shown
+  in the panel.
 
-- **Palette:** `#fffff8` cream canvas, `#14202e` navy ink, `#8b0000` oxblood accent. Categories use ink tints plus one or two muted accents (oxblood, ochre, slate), not a rainbow.
-- **Type:** `et-book, Palatino, Georgia, serif` for titles and event text. `Menlo, monospace` for the year, stats and legend labels.
-- **Globe:** a line-art orthographic globe (d3-geo): white ocean, thin black coastlines, no textures and no bloom. Events are small solid dots. Scale sets the size and Jev confidence sets the opacity.
-- **Backdrop:** a halftone dot field behind the globe whose density follows event volume over time. This replaces the glow as the "lots happening" signal.
-- **Layout:** long-form serif column on the left, sticky globe panel on the right. Under the globe: a mono year chip, a dotted timeline with a scrubber, a category legend with counts, and a small stat row (events, wars, discoveries in view).
-- **Scroll story (optional):** essay sections tagged with `data-year` and parked with `scroll-margin-top: 50vh`. An IntersectionObserver sets the active era and the globe tweens to it. Free scrubbing still works.
-- **Motion:** still by default; animation only under `prefers-reduced-motion: no-preference`.
-- **Rendering:** 50k SVG nodes is too many. Draw the outline and graticule in SVG, and draw the event dots on a `<canvas>` using the same projection. No three.js is needed.
+A 36×18 `DensityGrid` (`src/globe/density.ts`, 10° cells in both axes) backs
+the glow/heatmap layer under the globe; it's an accumulate-and-decay grid
+that's only rebuilt when doing so is cheaper than incrementally updating it.
+Pulses (the "event just fired" flash) are tracked as a separate bounded
+list, `MAX_PULSES = 300` (`src/state.ts`), and are only emitted for
+non-minor events.
 
-## Jev panel: moving bars
+A `tests/perf.test.ts` benchmark checks all of this holds a budget: with the
+50k-event synthetic set, one frame's worth of globe update + draw-prep work
+at `pos=1` measured **12.12ms** against a 25ms budget (dot window 3000 of
+18212 candidates, era n=4000, 61 non-empty density cells).
 
-On the right, cards styled after the Jev Doom demo: one card per question, one bar per option, the winning option bold and the rest dimmed, with `conf` shown under each card. Bars slide between values.
+**Data pipeline.** `scripts/build-data.ts` reads `data/raw/events.ndjson`
+and writes the bundle the app fetches at runtime into `public/data/`: a
+columnar `index.<hash>.json`, ~2000-event text shards (`shards/*.<hash>.json`,
+`SHARD_SIZE = 2000`), an `eras.<hash>.json`, and a `manifest.json` that
+points at that build's hashed filenames. Every file except `manifest.json`
+is content-hashed, so `public/_headers` caches `/data/index.*.json`,
+`/data/eras.*.json`, and `/data/shards/*` immutably (`max-age=31536000,
+immutable`) while `manifest.json` gets a short revalidated cache
+(`max-age=300, must-revalidate`) since it's the one file whose name stays
+stable across deploys. `scripts/gen-synthetic.ts` generates the current
+50,000-event synthetic dataset used for development and the perf benchmark.
 
-### Showreel (the default experience)
-Record once, then replay forever for free. We save data, not video, so the replay stays interactive (pause, scrub, hover) and sharp at any size.
-- **Per-event cards**: the saved answers for each event pop in as the year arrives.
-- **Era panel**: every 5–10 years, one Jev call is made with the events in that window ("what dominated this era?"). On playback the page tweens from one snapshot to the next.
-- **Save each call's latency** and show it in a corner (`412 ms`).
-- **Label it** "Recorded run · jev-1.13.0 · <date>". Re-recording later on a new model gives a before/after comparison.
+**Narrative.** `src/narrative/index.ts` uses an `IntersectionObserver` over
+`.era-sec` and `.landmark-card` elements to drive the active-era state as
+the user scrolls a 17-era narrative column interleaved with landmark cards.
+`src/narrative/comet.ts` (`CometRail`) paints the connector trail alongside
+that column. `src/narrative/reelScroll.ts` (`ReelScroll`) syncs the replay
+("reel") playback and narrative scroll position bidirectionally — scrolling
+drives playback position, and letting the reel play scrolls the narrative
+to match — but only on the desktop two-column layout (`min-width: 861px`);
+below that breakpoint the columns stack and scroll sync is not active.
 
-### Live mode ("Try it live")
-- **The user types an event.** Once typing pauses for ~300 ms, Jev is asked again, so the bars shift as the sentence grows.
-- **Place**: from the `country` Choice, or the user clicks the globe. **Year**: typed by the user. A Noul question, "is this a real historical event?", filters out junk.
-- **Tiny server** (a Cloudflare Worker) holds the API key. It enforces a per-visitor limit (2 calls/s, 300 a day) and a global daily cap (about $0.50); when the cap is hit it shows "Jev is resting".
-- Measured: about $0.00002 per call and 370–450 ms per call once the connection is warm.
+## Design direction
 
-## Budget ($5 total)
+The app currently uses a dark galaxy backdrop with a pixel-art aesthetic
+(pixel-scale rendering, dithered star tints, a per-theme nebula field) and
+an "Instrument panel" UI layered over it — direction B, applied across the
+app in commit `b814774`. Panel surfaces, cards, and controls share one
+visual vocabulary defined as CSS custom properties in `src/styles/main.css`:
 
-| Step | Tokens | Cost |
-|---|---|---|
-| Pilot: 500 events | ~230k | ~$0.01 |
-| Full run: 50k events | ~23M | ~$1 |
-| Showreel era snapshots: ~1k | ~1M | < $0.05 |
-| Live mode, per visitor typing an event (~20 calls) | ~9k | ~$0.0004 |
-| Headroom for re-runs / prompt tweaks | | plenty |
+- `--b-fill`: the panel-surface background (`color-mix` of the theme's
+  void color with transparency).
+- `--b-border`: the panel-surface hairline border (`color-mix` of the
+  theme's accent color with transparency).
+- `--notch`: a shared `clip-path: polygon(...)` that clips the corners of
+  panel surfaces into a small chamfered/notched shape instead of rounded
+  corners — used on cards, buttons, menus, the hover tooltip, and the live
+  input.
 
-Add a hard token counter to the tagging script that stops at a set cap.
+There are six selectable galaxy themes (`src/themes/index.ts`,
+`GALAXY_THEMES`). Theming works by injecting CSS custom properties from a
+single TypeScript theme table at runtime (`applyGalaxy`), with a small
+inline pre-paint `<script>` in `index.html` that only picks *which* theme
+id is marked (from a `jev-galaxy-default` localStorage key) before first
+paint, purely to avoid a flash of the wrong theme — the actual token values
+always come from the TS table, not from the pre-paint script or the
+per-theme CSS blocks that exist in the stylesheet as a paint-order fallback.
 
-## First steps (1–2 done: `scripts/probe*.mjs`)
+## Phases
 
-1. Read docs.typesafe.ai: request format, typed schemas, batching, rate limits, and **whether output tokens are billed**.
-2. Get an API key from console.typesafe.ai.
-3. Scrape ~500 events from a few centuries, tag them, and check the tags by hand. Adjust categories if needed.
-4. Build the globe on the pilot data before scaling up.
-5. Run the full 50k.
+**Phase 0 — COMPLETE.** The full interactive app, built against a 50,000-
+event synthetic dataset (`scripts/gen-synthetic.ts`). Globe, galaxy
+backdrop, timeline, Jev panel, narrative scroll story with landmark cards,
+theme switcher, and bidirectional reel/scroll sync are all in place. 36
+tests pass (`npm test`); production build is ~140.6KB JS (~55.0KB gzip) plus
+~14.6KB CSS (~4.0KB gzip); the perf benchmark holds ~12ms at `pos=1` against
+a 25ms budget.
 
-## Open questions
+**Phase 1 — IN PROGRESS.** Replace the synthetic dataset with real, sourced
+events. Plan: a ~500-event pilot pulled and geolocated via Wikidata, each
+event carrying a stable QID and a citation, then scaling to ~5,000 events.
+Jev scoring (theme scores, impact, confidence) of these real events is part
+of this phase. Note: as of this writing, no Wikidata/QID plumbing exists
+yet in `src/` or `scripts/` — `data/raw/` currently holds only
+`sample.ndjson`, and the real-data pipeline (fetch, geolocate, score,
+convert into `events.ndjson`) still needs to be built.
 
-- Output-token pricing, and any early-access limits.
-- BC-era year pages are sparse; supplement with Wikidata "point in time" queries?
-- How to show events with a wide or uncertain location (e.g. "the Renaissance").
+**Phase 2 — FUTURE.** Not yet scoped. Placeholder only.
+
+## Deployment
+
+Cloudflare Pages, project name `epochs` (`wrangler.toml`), deployed with
+`npm run deploy` (`wrangler pages deploy dist --project-name epochs`),
+served at the custom domain `epochs.parthkohale.com`. Agents do not run
+`wrangler` or deploy — the user runs deploys themselves.
