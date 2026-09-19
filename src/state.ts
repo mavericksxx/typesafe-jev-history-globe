@@ -41,6 +41,15 @@ export interface AppState {
    * set, the globe's camera targets its lat/lon directly instead of the
    * usual corpus-derived focus event (see loop.ts#updateFocusRotation). */
   narrativeLandmark: LandmarkEvent | null;
+  /**
+   * True while the reel (playback or a timeline click/drag, plus a short
+   * grace period after) should be the one driving page scroll, rather than
+   * scroll driving the reel. While true (or while `playing`), loop.ts
+   * scrolls the page to follow `pos`, and the narrative
+   * IntersectionObserver must not write narrativeTarget/narrativeLandmark
+   * back — see reelDrivesScroll() below and narrative/index.ts.
+   */
+  timelineActive: boolean;
   calls: number;
   idx: number;
   readonly reducedMotion: boolean;
@@ -63,6 +72,7 @@ function initialState(): AppState {
     pulses: [],
     narrativeTarget: null,
     narrativeLandmark: null,
+    timelineActive: false,
     calls: 0,
     idx: 0,
     reducedMotion:
@@ -159,6 +169,20 @@ export function setNarrativeTarget(target: number | null): void {
 
 export function setNarrativeLandmark(landmark: LandmarkEvent | null): void {
   state.narrativeLandmark = landmark;
+}
+
+export function setTimelineActive(active: boolean): void {
+  state.timelineActive = active;
+}
+
+/** Whether the reel should currently be driving page scroll (playback, or a
+ * timeline interaction within its grace period) — the flip side of normal
+ * scroll-drives-reel mode. Used both by loop.ts (to decide whether to call
+ * window.scrollTo) and by narrative/index.ts's IntersectionObserver (to
+ * suppress writing narrativeTarget/narrativeLandmark while that's
+ * happening, so the two directions don't fight each other). */
+export function reelDrivesScroll(): boolean {
+  return state.playing || state.timelineActive;
 }
 
 export function setCalls(calls: number): void {

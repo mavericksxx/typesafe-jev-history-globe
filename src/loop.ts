@@ -19,11 +19,13 @@ import {
   setCalls,
   setIdx,
   clearDirty,
+  reelDrivesScroll,
 } from "./state";
 import { Globe, DOT_FADE_WINDOW, boundDotWindow } from "./globe";
 import { Timeline } from "./timeline";
 import { GalaxyBackdrop } from "./galaxy/backdrop";
 import { CometRail } from "./narrative/comet";
+import { ReelScroll } from "./narrative/reelScroll";
 import { EraPanel } from "./panel/era";
 import { EventStream } from "./panel/stream";
 import { getGalaxyTheme } from "./themes";
@@ -60,6 +62,7 @@ export interface LoopDeps {
   timeline: Timeline;
   galaxyBackdrop: GalaxyBackdrop;
   cometRail: CometRail;
+  reelScroll: ReelScroll;
   eraPanel: EraPanel;
   stream: EventStream;
   els: LoopEls;
@@ -265,7 +268,7 @@ export class Loop {
    */
   private easeNarrative(dt: number): void {
     const state = getState();
-    if (state.narrativeTarget === null || state.playing || state.dragging) return;
+    if (state.narrativeTarget === null || state.playing || state.dragging || state.timelineActive) return;
     const delta = state.narrativeTarget - state.pos;
     const snap = state.reducedMotion || delta < 0.0015 || delta < 0 || delta > LARGE_JUMP_T;
     if (snap) {
@@ -277,6 +280,26 @@ export class Loop {
       setPos(state.pos + delta * k);
       this.syncEventsTo(getState().pos, false);
     }
+  }
+
+  /**
+   * The reverse of easeNarrative: while the reel is driving (playback, or a
+   * timeline click/drag within its grace period — see reelDrivesScroll()),
+   * eases the page scroll so the narrative item matching `pos` sits at the
+   * viewport centre, interpolating continuously between item anchors by
+   * year rather than jumping item to item. A plain window.scrollTo per
+   * frame (via ReelScroll#step), not scrollIntoView. Desktop-only: on the
+   * stacked mobile layout the narrative and stage share one scroll, so
+   * hijacking it would fight the user's ability to read either column.
+   */
+  private driveReelScroll(dt: number): void {
+    if (!this.deps.reelScroll.isDesktopLayout) return;
+    if (!reelDrivesScroll()) return;
+    const state = getState();
+    const target = this.deps.reelScroll.targetScrollY(state.pos);
+    if (target === null) return;
+    const k = state.reducedMotion ? 1 : 1 - Math.pow(0.01, dt);
+    this.deps.reelScroll.step(target, k, state.reducedMotion);
   }
 
   private easeRotation(dt: number): void {
@@ -307,6 +330,7 @@ export class Loop {
     this.advancePlayback(dt);
     this.easeNarrative(dt);
     this.easeRotation(dt);
+    this.driveReelScroll(dt);
 
     const state = getState();
     const lo = state.pos - ERA_WINDOW;

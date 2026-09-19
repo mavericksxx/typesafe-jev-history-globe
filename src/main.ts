@@ -17,6 +17,7 @@ import {
   setAccent,
   setHoverEvent,
   setNarrativeTarget,
+  setTimelineActive,
   markAllDirty,
   markNarrativeDirty,
 } from "./state";
@@ -28,6 +29,7 @@ import { EventStream } from "./panel/stream";
 import { makeBars, setBars, makeImpact, setImpact } from "./panel/bars";
 import { renderNarrative, observeNarrative } from "./narrative";
 import { CometRail } from "./narrative/comet";
+import { ReelScroll } from "./narrative/reelScroll";
 import { judge } from "./live/judge";
 import { Loop } from "./loop";
 import {
@@ -81,16 +83,19 @@ async function boot(): Promise<void> {
   const narrativeNav = document.querySelector<HTMLElement>(".narrative");
   if (narrativeNav) observeNarrative(narrativeNav);
 
-  // ---------- comet-trail era connector ----------
+  // ---------- comet-trail era connector + reel<->scroll sync ----------
   const cometRail = new CometRail(byIdCanvas("eraRail"));
   const eraRailWrap = byId("eraRailWrap");
-  function measureCometRail(): void {
-    // The rail routes through both era sections and landmark cards.
+  const reelScroll = new ReelScroll();
+  function measureNarrativeAnchors(): void {
+    // Both the comet rail and the reel-drives-scroll sync route through the
+    // same era-sec + landmark-card elements, in document order.
     const anchorEls = [...byId("eraList").querySelectorAll<HTMLElement>(".era-sec, .landmark-card")];
     cometRail.measure(eraRailWrap, anchorEls);
+    reelScroll.measure(anchorEls);
     markNarrativeDirty();
   }
-  measureCometRail();
+  measureNarrativeAnchors();
   window.addEventListener("scroll", () => markNarrativeDirty(), { passive: true });
 
   // ---------- galaxy theme ----------
@@ -254,6 +259,7 @@ async function boot(): Promise<void> {
     timeline,
     galaxyBackdrop,
     cometRail,
+    reelScroll,
     eraPanel,
     stream,
     els: {
@@ -273,9 +279,10 @@ async function boot(): Promise<void> {
     globe.resize(globeBox.clientWidth, dpr);
     timeline.resize(dpr);
     galaxyBackdrop.resize(window.innerWidth, window.innerHeight);
-    // Era heights can reflow with the narrative column's width, so the
-    // comet's anchors/path need rebuilding too.
-    measureCometRail();
+    // Era heights can reflow with the narrative column's width (and the
+    // desktop/mobile breakpoint can flip), so both the comet's anchors and
+    // the reel-scroll targets need rebuilding too.
+    measureNarrativeAnchors();
     // Both canvases just got resized (and cleared) — force a repaint even
     // though pos/rot/accent haven't changed.
     markAllDirty();
@@ -304,12 +311,25 @@ async function boot(): Promise<void> {
   const tlStage = byId("tlStage");
   const tlHandle = byId("tlHandle");
   let tlDragging = false;
+  // A timeline click/drag hands scroll control to the reel for a short
+  // grace period (long enough for loop.ts's eased scroll to actually reach
+  // the target) rather than exactly the duration of the pointer gesture —
+  // a plain click is a near-instant pointerdown+pointerup, which wouldn't
+  // otherwise give the scroll animation any time to run at all.
+  const TIMELINE_ACTIVE_GRACE_MS = 700;
+  let timelineActiveTimer: ReturnType<typeof setTimeout> | null = null;
+  function markTimelineActive(): void {
+    setTimelineActive(true);
+    if (timelineActiveTimer !== null) clearTimeout(timelineActiveTimer);
+    timelineActiveTimer = setTimeout(() => setTimelineActive(false), TIMELINE_ACTIVE_GRACE_MS);
+  }
   function tlPosFromEvent(e: PointerEvent): number {
     const r = tlStage.getBoundingClientRect();
     return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
   }
   tlStage.addEventListener("pointerdown", (e) => {
     setNarrativeTarget(null);
+    markTimelineActive();
     tlDragging = true;
     tlStage.setPointerCapture(e.pointerId);
     setPos(tlPosFromEvent(e));
@@ -318,6 +338,7 @@ async function boot(): Promise<void> {
   });
   tlStage.addEventListener("pointermove", (e) => {
     if (!tlDragging) return;
+    markTimelineActive();
     setPos(tlPosFromEvent(e));
     loop.syncEventsTo(getState().pos, false);
   });
@@ -333,9 +354,44 @@ async function boot(): Promise<void> {
     if (np === null) return;
     e.preventDefault();
     setNarrativeTarget(null);
+    markTimelineActive();
     setPos(np);
     loop.syncEventsTo(getState().pos, false);
   });
+
+  // ---------- user-initiated scroll hands control back from the reel ----------
+  // While the reel is driving scroll (playback, or the timeline's grace
+  // period above), a real user scroll gesture should pause playback and
+  // let the narrative drive again — detected from the input events
+  // themselves (wheel/touchmove/keydown), not from the resulting `scroll`
+  // event, since loop.ts's own window.scrollTo calls also produce those.
+  const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+  function isInsideJudgmentsScroll(target: EventTarget | null): boolean {
+    return target instanceof Element && target.closest(".stream") !== null;
+  }
+  function onUserScrollIntent(e: Event): void {
+    // The judgments list has its own, unrelated scroll container — scrolling
+    // it must not count as "the user is trying to scroll the page".
+    if (isInsideJudgmentsScroll(e.target)) return;
+    if (getState().playing) {
+      setPlaying(false);
+      setPlayLabel();
+    }
+  }
+  window.addEventListener("wheel", onUserScrollIntent, { passive: true });
+  window.addEventListener("touchmove", onUserScrollIntent, { passive: true });
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      // The timeline handle's own arrow/home/end handling above already
+      // calls preventDefault and is what's driving pos in the first place
+      // — it isn't the user reaching for the page scrollbar.
+      if (e.target === tlHandle) return;
+      if (!SCROLL_KEYS.has(e.key)) return;
+      onUserScrollIntent(e);
+    },
+    { passive: true }
+  );
 
   // ---------- globe drag + hover ----------
   let dragAnchor: [number, number] | null = null;

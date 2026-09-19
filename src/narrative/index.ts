@@ -7,7 +7,7 @@
 import type { EraCopy } from "../data/loader";
 import type { LandmarkEvent, Theme } from "../data/types";
 import { T, fmtYear } from "../data/timescale";
-import { setNarrativeTarget, setNarrativeLandmark } from "../state";
+import { setNarrativeTarget, setNarrativeLandmark, reelDrivesScroll } from "../state";
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -69,6 +69,13 @@ export function observeNarrative(root: HTMLElement): void {
   const items = root.querySelectorAll<HTMLElement>(".era-sec, .landmark-card");
   const io = new IntersectionObserver(
     (entries) => {
+      // The reel (playback / a timeline click-or-drag) is currently driving
+      // scroll — this intersection change is a side effect of that, not a
+      // user browsing the narrative, so don't write anything back. Without
+      // this, the two directions fight: the reel scrolls to follow `pos`,
+      // this observer reacts to the resulting scroll and resets
+      // narrativeTarget, and easeNarrative fights the reel-driven position.
+      if (reelDrivesScroll()) return;
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         const el = entry.target as HTMLElement;
