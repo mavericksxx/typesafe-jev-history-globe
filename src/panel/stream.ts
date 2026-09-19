@@ -22,15 +22,38 @@ interface StreamEntry {
  * purposes — a few px of slop so normal momentum/rounding doesn't count as
  * "scrolled away". */
 const AT_TOP_EPSILON_PX = 4;
+/** Same idea, for "at the bottom": within this many px of the true end
+ * counts as fully scrolled, so the has-more fade drops instead of clipping
+ * the last real card. */
+const AT_BOTTOM_EPSILON_PX = 2;
 
 export class EventStream {
   private readonly container: HTMLElement;
   private readonly maxCards: number;
   private entries: StreamEntry[] = [];
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor(container: HTMLElement, maxCards = 60) {
     this.container = container;
     this.maxCards = maxCards;
+    this.container.addEventListener("scroll", () => this.updateFadeState(), { passive: true });
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(() => this.updateFadeState());
+      this.resizeObserver.observe(container);
+    }
+    this.updateFadeState();
+  }
+
+  /** Toggles .has-more — the bottom mask-image fade in main.css — so it only
+   * shows while there's actually more content below to hint at. Called on
+   * scroll, on resize (a ResizeObserver on the container, since the
+   * viewport-height-dependent max-height/flex sizing can change how much
+   * overflows), and after every content mutation below. */
+  private updateFadeState(): void {
+    const el = this.container;
+    const hasOverflow = el.scrollHeight > el.clientHeight + 1;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - AT_BOTTOM_EPSILON_PX;
+    el.classList.toggle("has-more", hasOverflow && !atBottom);
   }
 
   add(e: HistoryEvent): void {
@@ -61,6 +84,7 @@ export class EventStream {
       this.entries.pop();
       this.container.lastElementChild?.remove();
     }
+    this.updateFadeState();
     // double-rAF so the 0%-width bars paint once before animating to value,
     // matching the mockup's slide-in.
     requestAnimationFrame(() => requestAnimationFrame(() => setBars(rows, e.th)));
@@ -76,6 +100,7 @@ export class EventStream {
   clear(): void {
     this.container.innerHTML = "";
     this.entries = [];
+    this.updateFadeState();
   }
 
   /** Rebuilds the stream after a scrub, oldest first so the newest ends on
@@ -85,5 +110,6 @@ export class EventStream {
     this.clear();
     for (const e of events) this.add(e);
     this.container.scrollTop = 0;
+    this.updateFadeState();
   }
 }
