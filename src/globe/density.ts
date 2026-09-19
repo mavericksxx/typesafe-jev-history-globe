@@ -4,8 +4,10 @@
 // of playback speed; a grid keyed by geography is rotation-correct (it
 // projects like everything else on the globe) and represents genuine
 // accumulation — a cell's count only grows as `pos` passes more events in
-// it, updated incrementally (only the delta since last frame is touched,
-// never a rebuild) unless the position jumps backward past what's accumulated.
+// it, updated incrementally (only the delta since last sync is touched) for
+// a normal advance or scrub, and rebuilt from scratch only when that delta
+// walk would cost more than just recomputing the (smaller) target range —
+// see syncTo.
 import { THEMES } from "../data/types";
 import type { HistoryEvent, Theme } from "../data/types";
 import type { Project } from "./dots";
@@ -53,8 +55,19 @@ export class DensityGrid {
     this.counts[i] = this.counts[i]! + delta;
   }
 
-  /** Brings the grid to represent exactly `all[0..targetIdx)`. */
+  /** Brings the grid to represent exactly `all[0..targetIdx)`. A large
+   * backward jump (e.g. scrolling from the modern era back to antiquity)
+   * would otherwise mean walking every event *removed* one at a time; if
+   * that walk is bigger than just rebuilding the (much smaller) target
+   * range from scratch, do that instead. */
   syncTo(all: readonly HistoryEvent[], targetIdx: number): void {
+    const delta = Math.abs(targetIdx - this.idx);
+    if (delta > targetIdx) {
+      this.reset();
+      for (let i = 0; i < targetIdx; i++) this.add(all[i]!, 1);
+      this.idx = targetIdx;
+      return;
+    }
     if (targetIdx > this.idx) {
       for (let i = this.idx; i < targetIdx; i++) this.add(all[i]!, 1);
     } else if (targetIdx < this.idx) {

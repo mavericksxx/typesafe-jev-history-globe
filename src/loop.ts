@@ -30,6 +30,14 @@ import { getGalaxyTheme } from "./themes";
 import { THEME_COLORS } from "./themes";
 
 const REEL_SECONDS = 150;
+/** A narrative-scroll jump bigger than this fraction of T-space (or any
+ * backward jump) skips the smooth per-frame tween entirely — see
+ * easeNarrative. Tweening a big jump used to mean `pos` swept through every
+ * intermediate value across several frames, and since updateFocusRotation
+ * and syncEventsTo both react to "the current pos" every frame, a fast
+ * scroll made the globe retarget/pulse/rotate through everything in
+ * between — the "replays while catching up" jitter. */
+const LARGE_JUMP_T = 0.02;
 const FOCUS_WINDOW = 0.03;
 const FOCUS_FALLBACK_MAX_STEPS = 200;
 const RECENT_CARDS_MAX_STEPS = 5000;
@@ -187,15 +195,37 @@ export class Loop {
     );
   }
 
-  private updateFocusRotation(pos: number): void {
+  /**
+   * Debounced: a candidate focus has to be the best pick for FOCUS_DEBOUNCE_MS
+   * running before the camera actually retargets to it. Without this, a fast
+   * scroll that fires the narrative's IntersectionObserver across several
+   * era sections in quick succession could still make the camera commit to
+   * (and pulse) 2-3 different candidates in a row before settling — this
+   * makes it settle on whichever one is still the best pick once things
+   * stop changing, instead of ping-ponging through each intermediate one.
+   */
+  private static readonly FOCUS_DEBOUNCE_MS = 120;
+  private pendingFocus: HistoryEvent | null = null;
+  private pendingFocusSince = 0;
+
+  private updateFocusRotation(pos: number, now: number): void {
     const f = findFocusEvent(pos);
     const state = getState();
-    if (f && f !== state.focusEvent) {
-      setFocusEvent(f);
-      const latClamped = Math.max(-35, Math.min(35, f.lat * 0.6));
-      setTargetRotation([-f.lon, -latClamped]);
-      if (!state.reducedMotion) pushPulse(f, performance.now());
+    if (!f || f === state.focusEvent) {
+      this.pendingFocus = null;
+      return;
     }
+    if (f !== this.pendingFocus) {
+      this.pendingFocus = f;
+      this.pendingFocusSince = now;
+      return;
+    }
+    if (now - this.pendingFocusSince < Loop.FOCUS_DEBOUNCE_MS) return;
+    setFocusEvent(f);
+    const latClamped = Math.max(-35, Math.min(35, f.lat * 0.6));
+    setTargetRotation([-f.lon, -latClamped]);
+    if (!state.reducedMotion) pushPulse(f, now);
+    this.pendingFocus = null;
   }
 
   private advancePlayback(dt: number): void {
@@ -209,16 +239,33 @@ export class Loop {
     }
   }
 
+  /**
+   * Small movements (normal reading-pace scroll) still tween `pos` smoothly
+   * across frames, exactly as before. A large jump — or any backward one —
+   * snaps straight to the target instead of tweening through it: tweening
+   * a big jump meant `pos` swept through every intermediate value across
+   * several frames, and since both syncEventsTo and updateFocusRotation
+   * (called from frame() every frame) react to "the current pos", a fast
+   * scroll made the globe pulse/retarget/rotate through everything it
+   * passed on the way — the "replays while catching up" jitter. Snapping
+   * means syncEventsTo below runs once, at the destination (its `emit:
+   * false` path already only refreshes idx/cards, no pulses), and
+   * updateFocusRotation (called once per frame, right after this returns)
+   * sees the landed pos and retargets exactly once instead of once per
+   * swept-past event.
+   */
   private easeNarrative(dt: number): void {
     const state = getState();
     if (state.narrativeTarget === null || state.playing || state.dragging) return;
-    if (state.reducedMotion || Math.abs(state.narrativeTarget - state.pos) < 0.0015) {
+    const delta = state.narrativeTarget - state.pos;
+    const snap = state.reducedMotion || delta < 0.0015 || delta < 0 || delta > LARGE_JUMP_T;
+    if (snap) {
       setPos(state.narrativeTarget);
       this.syncEventsTo(getState().pos, false);
       setNarrativeTarget(null);
     } else {
       const k = 1 - Math.pow(0.01, dt);
-      setPos(state.pos + (state.narrativeTarget - state.pos) * k);
+      setPos(state.pos + delta * k);
       this.syncEventsTo(getState().pos, false);
     }
   }
@@ -264,7 +311,7 @@ export class Loop {
       now,
     });
 
-    this.updateFocusRotation(state.pos);
+    this.updateFocusRotation(state.pos, now);
     prunePulses(now, PULSE_LIFETIME_MS);
 
     const afterFocus = getState();
