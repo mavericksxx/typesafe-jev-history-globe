@@ -18,6 +18,7 @@ import {
   setHoverEvent,
   setNarrativeTarget,
   markAllDirty,
+  markNarrativeDirty,
 } from "./state";
 import { Globe, pickNearest, DOT_FADE_WINDOW, boundDotWindow } from "./globe";
 import { Timeline, TL_COLS } from "./timeline";
@@ -26,6 +27,7 @@ import { EraPanel } from "./panel/era";
 import { EventStream } from "./panel/stream";
 import { makeBars, setBars, makeImpact, setImpact } from "./panel/bars";
 import { renderNarrative, observeNarrative } from "./narrative";
+import { CometRail } from "./narrative/comet";
 import { judge } from "./live/judge";
 import { Loop } from "./loop";
 import {
@@ -76,6 +78,17 @@ async function boot(): Promise<void> {
   renderNarrative(byId("eraList"), eras);
   const narrativeNav = document.querySelector<HTMLElement>(".narrative");
   if (narrativeNav) observeNarrative(narrativeNav);
+
+  // ---------- comet-trail era connector ----------
+  const cometRail = new CometRail(byIdCanvas("eraRail"));
+  const eraRailWrap = byId("eraRailWrap");
+  function measureCometRail(): void {
+    const eraEls = [...byId("eraList").querySelectorAll<HTMLElement>(".era-sec")];
+    cometRail.measure(eraRailWrap, eraEls);
+    markNarrativeDirty();
+  }
+  measureCometRail();
+  window.addEventListener("scroll", () => markNarrativeDirty(), { passive: true });
 
   // ---------- galaxy theme ----------
   const initialId: GalaxyId = isGalaxyId(document.documentElement.dataset.galaxy)
@@ -242,6 +255,7 @@ async function boot(): Promise<void> {
     globe,
     timeline,
     galaxyBackdrop,
+    cometRail,
     eraPanel,
     stream,
     els: {
@@ -263,6 +277,9 @@ async function boot(): Promise<void> {
     globe.resize(globeBox.clientWidth, dpr);
     timeline.resize(dpr);
     galaxyBackdrop.resize(window.innerWidth, window.innerHeight);
+    // Era heights can reflow with the narrative column's width, so the
+    // comet's anchors/path need rebuilding too.
+    measureCometRail();
     // Both canvases just got resized (and cleared) — force a repaint even
     // though pos/rot/accent haven't changed.
     markAllDirty();

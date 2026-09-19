@@ -14,6 +14,11 @@ export interface DirtyFlags {
   globe: boolean;
   /** Position changed — the timeline canvas/handle need a repaint. */
   timeline: boolean;
+  /** A scroll (or a resize that reflows the narrative column) happened —
+   * the comet rail needs a repaint. Cleared every frame regardless of this
+   * flag once rendered; the comet's own trail-fade animation keeps the rail
+   * repainting on its own via CometRail#isAnimating, independent of it. */
+  narrative: boolean;
 }
 
 export interface AppState {
@@ -57,7 +62,7 @@ function initialState(): AppState {
     idx: 0,
     reducedMotion:
       typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)").matches : false,
-    dirty: { globe: true, timeline: true },
+    dirty: { globe: true, timeline: true, narrative: true },
   };
 }
 
@@ -158,9 +163,17 @@ export function setIdx(idx: number): void {
 export function clearDirty(): void {
   state.dirty.globe = false;
   state.dirty.timeline = false;
+  state.dirty.narrative = false;
 }
 
 export function markAllDirty(): void {
   state.dirty.globe = true;
   state.dirty.timeline = true;
+  state.dirty.narrative = true;
+}
+
+/** Scroll (or a resize/content change that reflows the narrative column) —
+ * the comet rail should repaint next frame. */
+export function markNarrativeDirty(): void {
+  state.dirty.narrative = true;
 }

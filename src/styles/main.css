@@ -136,7 +136,12 @@ h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; ma
 .layout { display: grid; gap: 30px; grid-template-areas: "stagecol" "narrative"; grid-template-columns: minmax(0, 1fr); }
 .stage-col { grid-area: stagecol; min-width: 0; }
 .narrative { grid-area: narrative; display: grid; gap: 14px; align-content: start; }
-.era-list { display: grid; gap: 8vh; }
+.era-rail-wrap { position: relative; }
+/* Rendered/scheduled by src/narrative/comet.ts via loop.ts's dirty-flag
+   check — not a permanent rAF loop. Sized to era-list's full height in
+   CometRail#measure(). */
+.era-rail { position: absolute; left: 0; top: 0; width: 38px; image-rendering: pixelated; pointer-events: none; }
+.era-list { display: grid; gap: 16px; padding-left: 48px; }
 @media (min-width: 861px) {
   /* Wide enough that .era-sec p's 56ch measure actually fits at its own
      font-size (was 230px, which forced ~28-character lines). */
@@ -147,7 +152,11 @@ h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; ma
   /* three columns (narrative + globe + panel) get cramped here; stack the panel under the globe instead */
   .stage { grid-template-columns: minmax(0, 1fr); }
 }
-.era-sec { scroll-margin-top: 50vh; min-height: 48vh; display: flex; flex-direction: column; justify-content: center; }
+/* Tightened from 48vh (per the approved comet-trail reference, which uses
+   172px/16px so about two eras fit in a viewport at once) — the
+   IntersectionObserver in narrative/index.ts syncs off a viewport-centre
+   rootMargin, not this height, so it keeps working unchanged. */
+.era-sec { scroll-margin-top: 50vh; min-height: 172px; display: flex; flex-direction: column; justify-content: center; }
 .era-plate { width: auto; }
 .era-sec h2 { font-weight: 400; font-size: 1.4rem; margin: 0 0 8px; text-shadow: var(--halo); }
 /* The one deliberate exception to "no plates": running narrative prose is

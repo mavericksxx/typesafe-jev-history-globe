@@ -23,6 +23,7 @@ import {
 import { Globe, DOT_FADE_WINDOW, boundDotWindow } from "./globe";
 import { Timeline } from "./timeline";
 import { GalaxyBackdrop } from "./galaxy/backdrop";
+import { CometRail } from "./narrative/comet";
 import { EraPanel } from "./panel/era";
 import { EventStream } from "./panel/stream";
 import { getGalaxyTheme } from "./themes";
@@ -53,6 +54,7 @@ export interface LoopDeps {
   globe: Globe;
   timeline: Timeline;
   galaxyBackdrop: GalaxyBackdrop;
+  cometRail: CometRail;
   eraPanel: EraPanel;
   stream: EventStream;
   els: LoopEls;
@@ -293,6 +295,13 @@ export class Loop {
     if (now - this.lastGalaxyDraw >= GALAXY_FRAME_MS) {
       this.lastGalaxyDraw = now;
       this.deps.galaxyBackdrop.draw(now, afterFocus.reducedMotion, window.scrollY);
+    }
+
+    // Comet rail: only paints on a scroll (dirty.narrative) or while its own
+    // trail is still fading — never a permanent 60fps loop when idle.
+    if (afterFocus.dirty.narrative || this.deps.cometRail.isAnimating()) {
+      const targetYDoc = window.scrollY + window.innerHeight / 2;
+      this.deps.cometRail.render(getGalaxyTheme(afterFocus.galaxyId), afterFocus.reducedMotion, now, targetYDoc);
     }
 
     this.deps.els.sEvents.textContent = afterFocus.idx.toLocaleString();
