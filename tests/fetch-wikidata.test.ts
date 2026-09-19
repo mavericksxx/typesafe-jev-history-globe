@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   bindingToRecord,
+  chooseCoord,
   classifyTheme,
+  classifyThemeFromClass,
+  CLASS_THEME_MAP,
   EVENT_TARGET,
+  NON_EVENT_CLASSES,
   parseWikidataPoint,
   parseWikidataYear,
   PERIODS,
@@ -198,6 +202,101 @@ describe("markMinor", () => {
     expect(nonMinor.length).toBeGreaterThan(0);
     expect(nonMinor.length).toBeLessThan(10);
     expect(nonMinor.every((e) => (e.sitelinks ?? 0) >= 90)).toBe(true);
+  });
+});
+
+describe("chooseCoord (Part 1: coordinate fallback chain)", () => {
+  const item = { value: "http://www.wikidata.org/entity/Q1" };
+
+  it("prefers P625 (direct coordinates) when present", () => {
+    const r = chooseCoord({
+      item,
+      c1: { value: "Point(10 20)" },
+      c2: { value: "Point(30 40)" },
+    });
+    expect(r).toEqual({ point: { lat: 20, lon: 10 }, rung: "P625" });
+  });
+
+  it("falls back to P276 (part-of location) when P625 is absent", () => {
+    const r = chooseCoord({ item, c2: { value: "Point(30 40)" } });
+    expect(r).toEqual({ point: { lat: 40, lon: 30 }, rung: "P276" });
+  });
+
+  it("falls back to P276/P131+ (containing admin entity) next", () => {
+    const r = chooseCoord({ item, c3: { value: "Point(1 2)" } });
+    expect(r).toEqual({ point: { lat: 2, lon: 1 }, rung: "P131" });
+  });
+
+  it("falls back to P17 (country) last, and only P17 sets locKind country downstream", () => {
+    const r = chooseCoord({ item, c4: { value: "Point(5 6)" } });
+    expect(r).toEqual({ point: { lat: 6, lon: 5 }, rung: "P17" });
+  });
+
+  it("returns null when every rung is empty or malformed", () => {
+    expect(chooseCoord({ item })).toBeNull();
+    expect(chooseCoord({ item, c1: { value: "garbage" }, c2: { value: "also garbage" } })).toBeNull();
+  });
+
+  it("skips a malformed higher-priority rung and falls through to a valid lower one", () => {
+    const r = chooseCoord({ item, c1: { value: "garbage" }, c2: { value: "Point(7 8)" } });
+    expect(r).toEqual({ point: { lat: 8, lon: 7 }, rung: "P276" });
+  });
+});
+
+describe("classifyThemeFromClass (Part 5: class -> theme, not keywords)", () => {
+  it("uses the class->theme map when the class is recognised, even if the label would mislead a keyword match", () => {
+    // "Fudan University" contains no theme keyword at all — the class map
+    // (Q3918 = university -> science) is what makes this accurate.
+    const th = classifyThemeFromClass("Fudan University", "Q3918");
+    expect(th.science).toBeGreaterThan(th.politics);
+  });
+
+  it("falls back to the label-keyword heuristic when the class is unrecognised", () => {
+    const th = classifyThemeFromClass("Battle of Marathon", "Q999999999");
+    expect(th.war).toBeGreaterThan(th.culture);
+  });
+
+  it("falls back to the label-keyword heuristic when no class is supplied", () => {
+    const th = classifyThemeFromClass("Battle of Marathon", undefined);
+    expect(th.war).toBeGreaterThan(th.culture);
+  });
+
+  it("covers every NON_EVENT_CLASSES qid with a religion/economy/science/culture theme", () => {
+    const nonWarPolitics: string[] = ["religion", "economy", "science", "culture"];
+    for (const { qid } of NON_EVENT_CLASSES) {
+      const theme = CLASS_THEME_MAP[qid];
+      expect(theme, `${qid} should be in CLASS_THEME_MAP`).toBeDefined();
+      expect(nonWarPolitics).toContain(theme);
+    }
+  });
+});
+
+describe("bindingToRecord with a resolved fallback rung (Part 1)", () => {
+  const base = {
+    item: { value: "http://www.wikidata.org/entity/Q31900" },
+    itemLabel: { value: "Battle of Marathon" },
+    date: { value: "-0489-09-07T00:00:00Z" },
+    coord: { value: "Point(23.97 38.12)" },
+  };
+
+  it("marks locKind 'country' when the coordinate resolved via the P17 rung", () => {
+    const rec = bindingToRecord(base, { rung: "P17" });
+    expect(rec!.locKind).toBe("country");
+  });
+
+  it("marks locKind 'point' when the coordinate resolved via P625/P276/P131", () => {
+    for (const rung of ["P625", "P276", "P131"] as const) {
+      expect(bindingToRecord(base, { rung })!.locKind).toBe("point");
+    }
+  });
+
+  it("defaults to locKind 'point' when no rung is given", () => {
+    expect(bindingToRecord(base)!.locKind).toBe("point");
+  });
+
+  it("derives theme from ?class when supplied", () => {
+    const rec = bindingToRecord({ ...base, class: { value: "http://www.wikidata.org/entity/Q3918" } });
+    expect(rec!.th.science).toBeGreaterThan(rec!.th.war);
   });
 });
 

@@ -30,6 +30,14 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 const OUT_PATH = path.join(REPO_ROOT, "data/raw/events.ndjson");
 const CACHE_DIR = path.join(REPO_ROOT, "data/cache/wikidata");
 const ENDPOINT = "https://query.wikidata.org/sparql";
+// QLever mirrors Wikidata but answers transitive property-path queries
+// (wdt:P31/wdt:P279*) that time out (HTTP 504) against WDQS at this scale —
+// used ONLY for stage-1 candidate discovery (item/class/date/sitelinks), per
+// the task brief's explicit sanction. Its snapshot being a few days stale is
+// irrelevant there: every candidate QID is re-resolved (coordinates, label)
+// against live WDQS in stage 2, so a stale or since-deleted QID simply fails
+// to resolve and is dropped rather than silently trusted.
+const QLEVER_ENDPOINT = "https://qlever.dev/api/wikidata";
 const USER_AGENT =
   "epochs-history-globe/0.1 (pilot data collection; contact: parthkohale@gmail.com)";
 
@@ -48,11 +56,6 @@ export const EVENT_TARGET = 50_000;
 /** Be polite to a shared public endpoint: minimum gap between live HTTP
  * requests (cached reads are instant and don't count against this). */
 const RATE_LIMIT_MS = 4000;
-// Once the query is DISTINCT/GROUP BY-deduped (see buildEventsQuery), every
-// OFFSET page still re-executes the full sort server-side, so a bigger page
-// is strictly cheaper per event than more, smaller pages. WDQS tolerates
-// pages in the low thousands for this query shape.
-const PAGE_SIZE = 1500;
 
 /** One slice of the 3000 BC - present timeline, with the fraction of
  * EVENT_TARGET it's entitled to. Weights sum to 1. Skewed toward modern
@@ -198,6 +201,69 @@ export function classifyTheme(label: string): Record<Theme, number> {
   return scores;
 }
 
+// ---- Part 5: interim theme from Wikidata class, not label keywords --------
+// A curated qid->theme map for the classes this pipeline actually queries
+// (EVENT_CLASSES, the occurrence subclasses reachable from Q1190554, and
+// NON_EVENT_CLASSES below). It intentionally does NOT try to cover the full
+// ~283k-item occurrence subclass tree (measured live against QLever,
+// 2026-09-20) — that tree is far too broad and long-tailed for a hand-curated
+// map to be honest about. Any class not listed here falls back to
+// classifyTheme's label-keyword heuristic, which is what happens today for
+// every event. Having ?class from the query available is what makes this an
+// improvement: the common, high-volume classes (battle, treaty, election,
+// church buildings, universities, ...) now get an accurate, deterministic
+// theme instead of relying on the label matching a keyword.
+export const CLASS_THEME_MAP: Record<string, Theme> = {
+  // war
+  Q178561: "war", // battle
+  Q198: "war", // war
+  Q124734: "war", // siege
+  Q209749: "war", // invasion
+  Q45382: "war", // coup d'état (verified live: Q45382 is coup, not "rebellion" — see EVENT_CLASSES note)
+  // politics
+  Q131569: "politics", // treaty
+  Q1656682: "politics", // planned event (default political framing; usually ceremonies/summits)
+  Q40231: "politics", // election
+  Q209715: "politics", // coronation
+  Q10931: "politics", // revolution
+  Q1301371: "politics", // referendum
+  Q3624078: "politics", // sovereign state (used for P571/founding events)
+  // religion
+  Q747074: "religion", // ecumenical council
+  Q219557: "religion", // synod
+  Q16970: "religion", // church building
+  Q32815: "religion", // mosque
+  Q34627: "religion", // synagogue
+  Q44539: "religion", // temple
+  Q44613: "religion", // monastery
+  // economy
+  Q783794: "economy", // company/business
+  Q22667: "economy", // railway
+  Q12280: "economy", // bridge
+  // science
+  Q3918: "science", // university
+  Q3914: "science", // school
+  Q62832: "science", // observatory
+  // culture
+  Q33506: "culture", // museum
+  Q24354: "culture", // theatre building
+  Q22698: "culture", // park
+  Q515: "culture", // city (founding — closest single-theme fit for a settlement's inception)
+};
+
+/** Interim theme derivation for Part 5: prefers the class->theme map (when
+ * the query supplied a recognised ?class), falling back to the label-keyword
+ * heuristic (classifyTheme) for classes outside the curated map — which, for
+ * the broadened occurrence-subclass tree, is most of them. Still no LLM
+ * scoring (out of scope); `impact` stays the documented 1.5 placeholder. */
+export function classifyThemeFromClass(label: string, classQid: string | undefined): Record<Theme, number> {
+  const theme = classQid ? CLASS_THEME_MAP[classQid] : undefined;
+  if (!theme) return classifyTheme(label);
+  const scores = Object.fromEntries(THEMES.map((t) => [t, 0.1])) as Record<Theme, number>;
+  scores[theme] = 0.8; // higher confidence than the keyword heuristic's 0.75
+  return scores;
+}
+
 // ---- SPARQL -----------------------------------------------------------------
 
 // A curated list of common historical-event classes, queried by direct
@@ -235,6 +301,13 @@ export const EVENT_CLASSES = [
 // one) and their P571/P1619/P576 dates reach far back into antiquity —
 // expected to be the largest single recovery for the religion/economy/
 // science/culture themes and for pre-500-AD periods generally.
+// Every QID below was verified live 2026-09-20 against the endpoint (batched
+// VALUES + rdfs:label lookup, same pattern EVENT_CLASSES uses) via
+// scripts/verify-event-classes.ts, which now checks this list too. Two QIDs
+// from the original draft were wrong and are corrected here: Q495015 is
+// "Fudan University" not "observatory" (replaced with Q62832, the actual
+// "observatory" class), and Q11424 was an explicitly-flagged placeholder for
+// "railway" (replaced with Q22667, the real "railway" class).
 export const NON_EVENT_CLASSES = [
   { qid: "Q515", label: "city" },
   { qid: "Q44613", label: "monastery" },
@@ -244,81 +317,143 @@ export const NON_EVENT_CLASSES = [
   { qid: "Q44539", label: "temple" },
   { qid: "Q3914", label: "school" },
   { qid: "Q3918", label: "university" },
-  { qid: "Q495015", label: "observatory" },
+  { qid: "Q62832", label: "observatory" },
   { qid: "Q783794", label: "company" },
   { qid: "Q22698", label: "park" },
-  { qid: "Q11424", label: "railway" }, // placeholder id checked in verify script; treated as illustrative
+  { qid: "Q22667", label: "railway" },
   { qid: "Q12280", label: "bridge" },
-  { qid: "Q24354", label: "theatre" },
+  { qid: "Q24354", label: "theatre building" },
   { qid: "Q33506", label: "museum" },
 ] as const;
-// NOTE: NON_EVENT_CLASSES QIDs are NOT all individually re-verified against
-// the live endpoint the way EVENT_CLASSES is (time budget) — treat this list
-// as a documented draft for the Part 2 broadening work, not a shipped
-// production query input. Anyone extending Part 2 into a real run must run
-// each QID through scripts/verify-event-classes.ts's pattern first.
+
+/** P571 (inception), P1619 (official opening), P576 (dissolved) — the dates
+ * Part 3's dated non-event items carry instead of P585/P580. */
+export const NON_EVENT_DATE_PROPS = ["P571", "P1619", "P576"] as const;
 
 function classValuesClause(classes: readonly { qid: string }[] = EVENT_CLASSES): string {
   return `VALUES ?class { ${classes.map((c) => `wd:${c.qid}`).join(" ")} }`;
 }
 
-/** SELECT DISTINCT ?item, aggregated with GROUP BY so a quota of N fetched
- * rows really is N distinct Wikidata items (fixes 1c: an item with both
- * P585 and P580, multiple wdt:P625 coordinates, or matching more than one
- * class in EVENT_CLASSES previously produced duplicate rows, silently
- * under-delivering on the requested page size and triggering 429s from
- * over-fetching to compensate).
- *
- * Also pulls (1b) `?sitelinks` via wikibase:sitelinks for the minor/notable
- * split, and (1d) time precision via psv:P585/wikibase:timePrecision so
- * century/millennium-precision claims (which otherwise render as a fake
- * exact year) can be told apart from real year/month/day precision.
- * Precision is KEPT on the record rather than used to drop rows: dropping
- * would disproportionately shrink the already-scarce ancient periods, which
- * is the opposite of what Part 2 is trying to do. */
-/** Deliberately does NOT resolve labels (see buildLabelsQuery below): live
- * testing against WDQS found that adding `SERVICE wikibase:label` to this
- * GROUP BY query — whether inline (label service can't bind inside a
- * GROUP BY at all; ?itemLabel comes back unbound for every row) or wrapped
- * in an outer SELECT around a GROUP BY subquery (syntactically fine, but
- * consistently 504-timed-out server-side, unlike either query alone) —
- * breaks. Splitting into two cheap queries (this one, plus a batched
- * VALUES + label-service lookup in buildLabelsQuery) is what actually works
- * in practice, and is a smaller change than it looks: it's the same
- * two-request shape Part 2's coordinate-resolution stage already needs. */
-function buildEventsQuery(period: Period, limit: number, offset: number): string {
-  // NOTE on aggregate choice: MIN()/MAX() over these columns triggers a
-  // live-verified Blazegraph StackOverflowError (WDQS's SPARQL engine) when
-  // combined with GROUP BY + the p:/psv: qualifier-value path used for date
-  // precision — reproduced directly against the endpoint while building this
-  // query, independent of anything specific to this codebase. SAMPLE() for
-  // every aggregated column avoids it and is what's used throughout. This
-  // means ?date and ?prec are not guaranteed to come from the same
-  // underlying P585/P580 statement when an item has more than one
-  // qualifying value in the period window — an accepted approximation
-  // (most items have exactly one) rather than a guaranteed-correct pairing.
-  return `SELECT ?item (SAMPLE(?date) AS ?date) (SAMPLE(?prec) AS ?prec) (SAMPLE(?coord) AS ?coord) (SAMPLE(?article) AS ?article) (SAMPLE(?sitelinks) AS ?sitelinks) WHERE {
-  ${classValuesClause()}
-  ?item wdt:P31 ?class .
-  ?item wdt:P625 ?coord .
+// ---- Part 1/2/3/4: stage-1 candidate discovery -----------------------------
+// Stage 1 pulls (item, class, date, sitelinks, enwiki article) with NO
+// coordinate requirement — requiring wdt:P625 up front is the single biggest
+// yield killer (waiving it roughly triples the ceiling, per the measurement
+// in the task brief). Coordinates are resolved separately in stage 2 via a
+// fallback chain, batched by QID.
+//
+// Run against QLEVER_ENDPOINT rather than WDQS: it answers the transitive
+// wdt:P31/wdt:P279* walk from occurrence (Q1190554) directly, which is what
+// lets Part 2's class broadening happen inline instead of needing a
+// materialized closure fed back as hundreds of VALUES batches (283,131
+// subclasses of occurrence, measured live 2026-09-20 — far too many to batch
+// through WDQS's per-query VALUES limits in any reasonable time). QLever's
+// snapshot lag doesn't matter here: every candidate QID stage 2 keeps is
+// re-resolved (coordinates, label, sitelinks) against live WDQS, so a stale
+// or since-deleted QID just fails to resolve and is silently dropped.
+//
+// Selection is ranked (Part 4): ORDER BY DESC(?sitelinks) LIMIT N, not the
+// old arbitrary ORDER BY ?item, so a broadened class set doesn't hand back an
+// arbitrary IRI-ordered slice once Wikidata over-supplies a period.
+// NOTE: the raw (pre-SAMPLE) pattern variables are named ?dateRaw/?articleRaw/
+// ?sitelinksRaw, distinct from the SELECTed ?date/?article/?sitelinks —
+// QLever (unlike WDQS/Blazegraph) rejects "the target of an AS clause was
+// already used in the query body", i.e. `(SAMPLE(?x) AS ?x)` is invalid there.
+function buildCandidatesQuery(period: Period, limit: number): string {
+  const nonEventValues = classValuesClause(NON_EVENT_CLASSES);
+  const nonEventDates = NON_EVENT_DATE_PROPS.map((p) => `{ ?item wdt:${p} ?dateRaw }`).join(" UNION ");
+  return `SELECT ?item ?class (SAMPLE(?dateRaw) AS ?date) (SAMPLE(?articleRaw) AS ?article) (SAMPLE(?sitelinksRaw) AS ?sitelinks) WHERE {
   {
-    ?item p:P585 ?dateStmt . ?dateStmt psv:P585 ?dateVal .
-    ?dateVal wikibase:timeValue ?date ; wikibase:timePrecision ?prec .
+    # Part 2: occurrence subclass closure, walked inline by QLever.
+    ?item wdt:P31 ?class .
+    ?class wdt:P279* wd:Q1190554 .
+    { ?item wdt:P585 ?dateRaw } UNION { ?item wdt:P580 ?dateRaw }
   } UNION {
-    ?item p:P580 ?dateStmt2 . ?dateStmt2 psv:P580 ?dateVal2 .
-    ?dateVal2 wikibase:timeValue ?date ; wikibase:timePrecision ?prec .
+    # Part 3: dated non-event institutions/structures.
+    ${nonEventValues}
+    ?item wdt:P31 ?class .
+    ${nonEventDates}
   }
-  FILTER(YEAR(?date) >= ${period.start} && YEAR(?date) < ${period.end})
-  ?item wikibase:sitelinks ?sitelinks .
+  FILTER(YEAR(?dateRaw) >= ${period.start} && YEAR(?dateRaw) < ${period.end})
+  ?item wikibase:sitelinks ?sitelinksRaw .
   OPTIONAL {
-    ?article schema:about ?item ;
+    ?articleRaw schema:about ?item ;
              schema:isPartOf <https://en.wikipedia.org/> .
   }
 }
-GROUP BY ?item
+GROUP BY ?item ?class
 ORDER BY DESC(?sitelinks) ?item
-LIMIT ${limit}
-OFFSET ${offset}`;
+LIMIT ${limit}`;
+}
+
+/** Stage-1 ceiling: how many qualifying (item, class, date) candidates exist
+ * for a period with NO coordinate requirement — the number Part 1 says is
+ * roughly 3x the old coordinate-required ceiling. This is what `resolveQuotas`
+ * is measured against now; coordinate resolution in stage 2 then determines
+ * how many of those candidates actually make it into the output. */
+function buildCandidateCountQuery(period: Period): string {
+  const nonEventValues = classValuesClause(NON_EVENT_CLASSES);
+  const nonEventDates = NON_EVENT_DATE_PROPS.map((p) => `{ ?item wdt:${p} ?date }`).join(" UNION ");
+  return `SELECT (COUNT(DISTINCT ?item) AS ?c) WHERE {
+  {
+    ?item wdt:P31 ?class .
+    ?class wdt:P279* wd:Q1190554 .
+    { ?item wdt:P585 ?date } UNION { ?item wdt:P580 ?date }
+  } UNION {
+    ${nonEventValues}
+    ?item wdt:P31 ?class .
+    ${nonEventDates}
+  }
+  FILTER(YEAR(?date) >= ${period.start} && YEAR(?date) < ${period.end})
+}`;
+}
+
+// ---- Part 1: stage-2 coordinate resolution with fallback chain ------------
+// Rungs, first-match wins: direct coordinates -> the location it's part of
+// (P276) -> that location's containing administrative entity, transitively
+// (P276/P131+) -> the country of the item itself (P17). The last rung sets
+// locKind: "country" (already supported by the app — gen-synthetic emits it).
+// P131+ is bounded to the batch already in play (COORD_BATCH_SIZE QIDs) so it
+// can't run away the way an unbounded whole-graph walk would.
+export type CoordRung = "P625" | "P276" | "P131" | "P17";
+export const COORD_BATCH_SIZE = 60;
+
+function buildCoordsQuery(qids: string[]): string {
+  return `SELECT ?item (SAMPLE(?c1) AS ?c1) (SAMPLE(?c2) AS ?c2) (SAMPLE(?c3) AS ?c3) (SAMPLE(?c4) AS ?c4) WHERE {
+  VALUES ?item { ${qids.map((q) => `wd:${q}`).join(" ")} }
+  OPTIONAL { ?item wdt:P625 ?c1 . }
+  OPTIONAL { ?item wdt:P276 ?loc1 . ?loc1 wdt:P625 ?c2 . }
+  OPTIONAL { ?item wdt:P276 ?loc2 . ?loc2 wdt:P131+ ?adm . ?adm wdt:P625 ?c3 . }
+  OPTIONAL { ?item wdt:P17 ?country . ?country wdt:P625 ?c4 . }
+}
+GROUP BY ?item`;
+}
+
+interface CoordBinding {
+  item: { value: string };
+  c1?: { value: string };
+  c2?: { value: string };
+  c3?: { value: string };
+  c4?: { value: string };
+}
+
+/** Picks the first rung of the fallback chain (P625 -> P276 -> P131+ -> P17)
+ * that resolved to a usable point, and reports which rung it was so the
+ * report can show the coordinate-source mix. Returns null if every rung came
+ * back empty or malformed — such items are dropped, never guessed at. */
+export function chooseCoord(
+  b: CoordBinding
+): { point: { lat: number; lon: number }; rung: CoordRung } | null {
+  const rungs: [CoordRung, string | undefined][] = [
+    ["P625", b.c1?.value],
+    ["P276", b.c2?.value],
+    ["P131", b.c3?.value],
+    ["P17", b.c4?.value],
+  ];
+  for (const [rung, raw] of rungs) {
+    const point = parseWikidataPoint(raw);
+    if (point) return { point, rung };
+  }
+  return null;
 }
 
 /** Resolves labels for a batch of QIDs via a flat VALUES + label-service
@@ -332,18 +467,9 @@ function buildLabelsQuery(qids: string[]): string {
 }`;
 }
 
-function buildCountQuery(period: Period): string {
-  return `SELECT (COUNT(DISTINCT ?item) AS ?c) WHERE {
-  ${classValuesClause()}
-  ?item wdt:P31 ?class .
-  ?item wdt:P625 ?coord .
-  { ?item wdt:P585 ?date } UNION { ?item wdt:P580 ?date }
-  FILTER(YEAR(?date) >= ${period.start} && YEAR(?date) < ${period.end})
-}`;
-}
-
 interface SparqlBinding {
   item: { value: string };
+  class?: { value: string };
   itemLabel?: { value: string };
   date?: { value: string };
   prec?: { value: string };
@@ -366,30 +492,68 @@ async function politeDelay(): Promise<void> {
   lastRequestAt = Date.now();
 }
 
+// WDQS registers common prefixes (wdt:, wd:, p:, psv:, wikibase:, schema:, ...)
+// server-side, so queries against it never declare them. QLever does not —
+// it requires every prefix used to be declared inline, or it 400s. Rather
+// than thread "which endpoint" state through every query builder, every
+// query is prefixed with this block before being sent; WDQS tolerates
+// (and ignores) redundant PREFIX declarations for prefixes it already knows.
+const SPARQL_PREFIXES = `PREFIX wd: <http://www.wikidata.org/entity/>
+PREFIX wdt: <http://www.wikidata.org/prop/direct/>
+PREFIX p: <http://www.wikidata.org/prop/>
+PREFIX psv: <http://www.wikidata.org/prop/statement/value/>
+PREFIX wikibase: <http://wikiba.se/ontology#>
+PREFIX bd: <http://www.bigdata.com/rdf#>
+PREFIX schema: <http://schema.org/>
+`;
+
+const MAX_RETRIES = 5;
+
 /** Runs a SPARQL query, transparently caching the raw JSON response to disk
  * keyed by the query text's hash. A re-run (or a resumed interrupted run)
- * that asks for the same query never re-hits the endpoint. */
+ * that asks for the same query never re-hits the endpoint.
+ *
+ * Retries a live 429/502/503 with exponential backoff (honouring
+ * Retry-After when the server sends one) rather than failing the whole run:
+ * a shared public endpoint occasionally throttles or hiccups under a long
+ * multi-period pull even with RATE_LIMIT_MS respected between requests
+ * (observed live 2026-09-20 running this exact pipeline). A run that
+ * ultimately fails after MAX_RETRIES still throws, and — because nothing is
+ * cached until a request succeeds — simply re-invoking the script resumes
+ * from every already-cached query. */
 async function runQuery(query: string, cacheTag: string, endpoint = ENDPOINT): Promise<unknown> {
   mkdirSync(CACHE_DIR, { recursive: true });
   const cacheFile = path.join(CACHE_DIR, `${cacheTag}-${cacheKeyFor(query)}.json`);
   if (existsSync(cacheFile)) {
     return JSON.parse(readFileSync(cacheFile, "utf8"));
   }
-  await politeDelay();
-  const url = `${endpoint}?query=${encodeURIComponent(query)}&format=json`;
-  const res = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, Accept: "application/sparql-results+json" },
-  });
-  if (!res.ok) {
-    throw new Error(`SPARQL query failed (${res.status} ${res.statusText}): ${cacheTag}`);
+  const fullQuery = SPARQL_PREFIXES + query;
+  const url = `${endpoint}?query=${encodeURIComponent(fullQuery)}&format=json`;
+  for (let attempt = 0; ; attempt++) {
+    await politeDelay();
+    const res = await fetch(url, {
+      headers: { "User-Agent": USER_AGENT, Accept: "application/sparql-results+json" },
+    });
+    if (res.ok) {
+      const json = await res.json();
+      writeFileSync(cacheFile, JSON.stringify(json));
+      return json;
+    }
+    const retryable = res.status === 429 || res.status === 502 || res.status === 503;
+    if (!retryable || attempt >= MAX_RETRIES) {
+      throw new Error(`SPARQL query failed (${res.status} ${res.statusText}): ${cacheTag}`);
+    }
+    const retryAfterHeader = Number(res.headers.get("Retry-After"));
+    const backoffMs = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+      ? retryAfterHeader * 1000
+      : RATE_LIMIT_MS * 2 ** attempt;
+    console.warn(`  ${res.status} on ${cacheTag}, retrying in ${Math.round(backoffMs / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+    await new Promise((r) => setTimeout(r, backoffMs));
   }
-  const json = await res.json();
-  writeFileSync(cacheFile, JSON.stringify(json));
-  return json;
 }
 
 async function fetchCeiling(period: Period, periodIdx: number): Promise<number> {
-  const json = (await runQuery(buildCountQuery(period), `count-${periodIdx}`)) as {
+  const json = (await runQuery(buildCandidateCountQuery(period), `count-${periodIdx}`, QLEVER_ENDPOINT)) as {
     results: { bindings: { c: { value: string } }[] };
   };
   const raw = json.results.bindings[0]?.c?.value;
@@ -410,7 +574,7 @@ function qidFromUri(uri: string): string {
  * `true` here; fetchPeriodEvents flips the top ~2%-by-sitelinks per period to
  * `false` afterward (1b), since "top 2% of this period" isn't knowable from
  * a single binding in isolation. */
-export function bindingToRecord(b: SparqlBinding): RawEventRecord | null {
+export function bindingToRecord(b: SparqlBinding, opts?: { rung?: CoordRung }): RawEventRecord | null {
   const year = parseWikidataYear(b.date?.value);
   const point = parseWikidataPoint(b.coord?.value);
   if (year === null || point === null) return null;
@@ -419,13 +583,19 @@ export function bindingToRecord(b: SparqlBinding): RawEventRecord | null {
   if (/^Q\d+$/.test(label)) return null; // label never resolved (1f)
   const sitelinks = b.sitelinks?.value ? Number(b.sitelinks.value) : undefined;
   const datePrecision = b.prec?.value ? Number(b.prec.value) : undefined;
+  const classQid = b.class?.value ? qidFromUri(b.class.value) : undefined;
+  // Part 1: a coordinate resolved via the P17 (country) fallback rung isn't a
+  // point location for the item itself — mark it locKind "country" (already
+  // rendered distinctly by src/globe/dots.ts) rather than a misleadingly
+  // precise "point".
+  const locKind: LocKind = opts?.rung === "P17" ? "country" : "point";
   return {
     year,
     text: label,
     lat: point.lat,
     lon: point.lon,
-    locKind: "point" as LocKind,
-    th: classifyTheme(label),
+    locKind,
+    th: classifyThemeFromClass(label, classQid),
     // No Jev scoring in this pilot (out of scope) — documented placeholder,
     // mid-scale on the 0..3 impact range used elsewhere in the pipeline.
     impact: 1.5,
@@ -469,27 +639,102 @@ async function resolveLabels(qids: string[], cacheTag: string): Promise<Map<stri
   return map;
 }
 
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/** Overfetch factor for stage-1 candidates: some fraction never resolve
+ * coordinates on any fallback rung (Part 1) and get dropped, so asking for
+ * exactly `quota` candidates would under-deliver. 1.5x is a conservative
+ * cushion given the measured ~74% overall P625-required-vs-waived yield
+ * ratio from the task brief's ceiling table. */
+const COORD_OVERFETCH = 1.5;
+
+/** Tally of which fallback rung resolved each kept event's coordinates
+ * (Part 1), plus how many candidates were dropped for resolving on no rung
+ * at all. Reset per process; `main()` prints it in the run summary. */
+export const RUNG_STATS: Record<CoordRung | "none", number> = {
+  P625: 0,
+  P276: 0,
+  P131: 0,
+  P17: 0,
+  none: 0,
+};
+
+/** Resolves coordinates for a batch of QIDs (Part 1's fallback chain),
+ * batched to COORD_BATCH_SIZE so the bounded P131+ rung stays cheap. Returns
+ * a QID -> resolved-coordinate map; QIDs absent from the map resolved on no
+ * rung and are dropped by the caller. */
+async function resolveCoords(
+  qids: string[],
+  cacheTag: string
+): Promise<Map<string, { point: { lat: number; lon: number }; rung: CoordRung }>> {
+  const map = new Map<string, { point: { lat: number; lon: number }; rung: CoordRung }>();
+  for (const [i, batch] of chunk(qids, COORD_BATCH_SIZE).entries()) {
+    if (batch.length === 0) continue;
+    const json = (await runQuery(buildCoordsQuery(batch), `${cacheTag}-${i}`)) as {
+      results: { bindings: CoordBinding[] };
+    };
+    for (const b of json.results?.bindings ?? []) {
+      const resolved = chooseCoord(b);
+      const qid = qidFromUri(b.item.value);
+      if (resolved) map.set(qid, resolved);
+    }
+  }
+  return map;
+}
+
 async function fetchPeriodEvents(period: Period, periodIdx: number, quota: number): Promise<RawEventRecord[]> {
+  if (quota <= 0) return [];
+  // Stage 1: rank-ordered candidates (Part 4), overfetched to absorb
+  // coordinate-resolution loss.
+  const fetchLimit = Math.ceil(quota * COORD_OVERFETCH);
+  const candJson = (await runQuery(
+    buildCandidatesQuery(period, fetchLimit),
+    `cand-${periodIdx}`,
+    QLEVER_ENDPOINT
+  )) as SparqlResponse;
+  const candidates = candJson.results?.bindings ?? [];
+  if (candidates.length === 0) return [];
+
+  // Sequential, not Promise.all: politeDelay's rate limiter tracks a single
+  // shared lastRequestAt timestamp, which only holds requests to RATE_LIMIT_MS
+  // apart when they're issued one at a time. Concurrent label + coordinate
+  // batches raced past it and got 429'd by WDQS live during testing.
+  const qids = candidates.map((b) => qidFromUri(b.item.value));
+  const labels = new Map<string, string>();
+  for (const [i, batch] of chunk(qids, 300).entries()) {
+    const part = await resolveLabels(batch, `labels-${periodIdx}-${i}`);
+    for (const [k, v] of part) labels.set(k, v);
+  }
+  const coords = await resolveCoords(qids, `coords-${periodIdx}`);
+
   const out: RawEventRecord[] = [];
   const seen = new Set<string>();
-  for (let offset = 0; offset < quota; offset += PAGE_SIZE) {
-    const limit = Math.min(PAGE_SIZE, quota - offset);
-    const query = buildEventsQuery(period, limit, offset);
-    const json = (await runQuery(query, `page-${periodIdx}-${offset}`)) as SparqlResponse;
-    const bindings = json.results?.bindings ?? [];
-    if (bindings.length === 0) break; // endpoint has nothing more for this window
-    const qids = bindings.map((b) => qidFromUri(b.item.value));
-    const labels = await resolveLabels(qids, `labels-${periodIdx}-${offset}`);
-    for (const b of bindings) {
-      const qid = qidFromUri(b.item.value);
-      const label = labels.get(qid);
-      const rec = bindingToRecord({ ...b, itemLabel: label ? { value: label } : undefined });
-      if (!rec || !rec.qid) continue;
-      if (seen.has(rec.qid)) continue;
-      seen.add(rec.qid);
-      out.push(rec);
+  for (const b of candidates) {
+    if (out.length >= quota) break; // stage-1 order is already rank order
+    const qid = qidFromUri(b.item.value);
+    if (seen.has(qid)) continue;
+    const resolved = coords.get(qid);
+    if (!resolved) {
+      RUNG_STATS.none++;
+      continue; // no rung resolved a coordinate (Part 1) — drop, don't guess
     }
-    if (bindings.length < limit) break; // short page: nothing more to page through
+    const label = labels.get(qid);
+    const rec = bindingToRecord(
+      {
+        ...b,
+        itemLabel: label ? { value: label } : undefined,
+        coord: { value: `Point(${resolved.point.lon} ${resolved.point.lat})` },
+      },
+      { rung: resolved.rung }
+    );
+    if (!rec || !rec.qid) continue;
+    seen.add(qid);
+    RUNG_STATS[resolved.rung]++;
+    out.push(rec);
   }
   return markMinor(out);
 }
@@ -504,7 +749,7 @@ async function main(): Promise<void> {
   for (let i = 0; i < PERIODS.length; i++) {
     const c = await fetchCeiling(PERIODS[i]!, i);
     ceilings.push(c);
-    console.log(`  ceiling ${PERIODS[i]!.label}: ${c} qualifying items (date + coordinates)`);
+    console.log(`  ceiling ${PERIODS[i]!.label}: ${c} stage-1 candidates (date, coords waived — see coordinate-fallback stage)`);
   }
 
   const quotas = resolveQuotas(target, PERIODS, ceilings);
@@ -533,6 +778,29 @@ async function main(): Promise<void> {
   mkdirSync(path.dirname(OUT_PATH), { recursive: true });
   writeFileSync(OUT_PATH, all.map((r) => JSON.stringify(r)).join("\n") + "\n");
   console.log(`wrote ${all.length} real events to ${path.relative(REPO_ROOT, OUT_PATH)}`);
+
+  console.log("coordinate-fallback rung mix:");
+  for (const [rung, count] of Object.entries(RUNG_STATS)) {
+    console.log(`  ${rung}: ${count}`);
+  }
+
+  const themeCounts = Object.fromEntries(THEMES.map((t) => [t, 0])) as Record<Theme, number>;
+  for (const r of all) {
+    let top: Theme = "politics";
+    let best = -1;
+    for (const t of THEMES) {
+      if (r.th[t] > best) {
+        best = r.th[t];
+        top = t;
+      }
+    }
+    themeCounts[top]++;
+  }
+  console.log("theme balance (by top scoring theme):");
+  for (const t of THEMES) {
+    const pct = all.length ? ((themeCounts[t] / all.length) * 100).toFixed(1) : "0.0";
+    console.log(`  ${t}: ${themeCounts[t]} (${pct}%)`);
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

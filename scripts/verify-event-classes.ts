@@ -7,7 +7,7 @@
 // EVENT_CLASSES:
 //
 //   tsx scripts/verify-event-classes.ts
-import { EVENT_CLASSES } from "./fetch-wikidata";
+import { EVENT_CLASSES, NON_EVENT_CLASSES } from "./fetch-wikidata";
 
 const ENDPOINT = "https://query.wikidata.org/sparql";
 const USER_AGENT = "epochs-globe/1.0 (event-class verification script; contact: parthkohale@gmail.com)";
@@ -26,7 +26,8 @@ async function labelFor(qid: string): Promise<string | null> {
 
 async function main(): Promise<void> {
   let failures = 0;
-  for (const { qid, label: expected } of EVENT_CLASSES) {
+  const allClasses = [...EVENT_CLASSES, ...NON_EVENT_CLASSES];
+  for (const { qid, label: expected } of allClasses) {
     await new Promise((r) => setTimeout(r, RATE_LIMIT_MS));
     const actual = await labelFor(qid);
     const ok = actual === expected;
@@ -34,10 +35,12 @@ async function main(): Promise<void> {
     console.log(`${ok ? "OK  " : "FAIL"} ${qid}: expected "${expected}", got "${actual ?? "(none)"}"`);
   }
   if (failures > 0) {
-    console.error(`${failures} EVENT_CLASSES entr${failures === 1 ? "y" : "ies"} mismatched — fix scripts/fetch-wikidata.ts`);
+    console.error(
+      `${failures} of ${allClasses.length} class entries (EVENT_CLASSES + NON_EVENT_CLASSES) mismatched — fix scripts/fetch-wikidata.ts`
+    );
     process.exit(1);
   }
-  console.log(`all ${EVENT_CLASSES.length} EVENT_CLASSES entries verified against the live endpoint`);
+  console.log(`all ${allClasses.length} EVENT_CLASSES + NON_EVENT_CLASSES entries verified against the live endpoint`);
 }
 
 main().catch((err) => {
