@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Epochs</title>
+<meta name="description" content="A spinning pixel-art galaxy history globe. Scrub from 3000 BC to today." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<script>
+  // Set the galaxy theme before first paint, so there's no flash of the
+  // default theme. This only picks *which* theme id to mark; the actual
+  // colour values come from the `:root[data-galaxy]` CSS blocks until
+  // src/themes/index.ts attaches and takes over as the source of truth.
+  (function () {
+    var ids = ["deep-violet", "spiral-core", "observatory-mono", "amber-dusk", "phosphor-tide", "magenta-vapor"];
+    var saved = null;
+    try { saved = localStorage.getItem("jev-galaxy-default"); } catch (err) {}
+    document.documentElement.dataset.galaxy = saved && ids.indexOf(saved) > -1 ? saved : "spiral-core";
+  })();
+</script>
+</head>
+<body>
+<canvas class="galaxy-bg" id="galaxyBg" aria-hidden="true"></canvas>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-name">Epochs</span>
+    <div class="theme-switch">
+      <button class="theme-btn" id="themeBtn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu">
+        <span class="cur-swatch" id="themeBtnSwatch"></span>
+        <span><span class="theme-btn-prefix">Theme: </span><span id="themeBtnLabel">Spiral Core</span></span>
+        <span class="chev" aria-hidden="true">&#9662;</span>
+      </button>
+      <ul class="theme-menu" id="themeMenu" role="menu" aria-label="Galaxy theme" hidden></ul>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <header>
+    <div class="hero-plate">
+      <h1>Five thousand years, tagged once</h1>
+      <p class="dek">Press play, drag the timeline, or scroll through the eras.</p>
+    </div>
+    <div class="meta"><span class="mock" id="datasetMeta">Loading…</span></div>
+  </header>
+
+  <div class="layout">
+    <nav class="narrative" aria-label="History eras">
+      <p class="narrative-note">Scroll to move the reel</p>
+      <div class="era-list" id="eraList"></div>
+    </nav>
+
+    <div class="stage-col">
+      <section class="stage">
+        <div>
+          <div class="globe-box" id="globeBox">
+            <canvas id="globe" role="img" aria-label="Globe showing historical events as dots"></canvas>
+            <div class="year-chip" id="yearChip">3000 BC</div>
+            <div class="hover" id="hover" hidden></div>
+          </div>
+          <div class="timeline">
+            <div class="tl-row">
+              <button class="btn" id="play" aria-label="Play">Play</button>
+              <div class="speed" role="group" aria-label="Playback speed">
+                <button data-s="0.5" aria-pressed="false">&frac12;&times;</button>
+                <button data-s="1" aria-pressed="true">1&times;</button>
+                <button data-s="3" aria-pressed="false">3&times;</button>
+              </div>
+            </div>
+            <div class="tl-stage" id="tlStage">
+              <canvas id="tlCanvas" aria-hidden="true"></canvas>
+              <div class="tl-handle" id="tlHandle" role="slider" tabindex="0" aria-orientation="horizontal"
+                   aria-label="Timeline position" aria-valuemin="-3000" aria-valuemax="2026"
+                   aria-valuenow="1520" aria-valuetext="1520">
+                <span class="tl-handle-label" id="tlLabel">1520</span>
+              </div>
+            </div>
+            <div class="tl-ticks" id="tlTicks"></div>
+            <div class="stats">
+              <div><b id="sEvents">0</b><span>events</span></div>
+              <div><b id="sCalls">0</b><span>judged</span></div>
+              <div><b id="sCost">$0.00000</b><span>spent</span></div>
+              <div><b id="sTheme">&mdash;</b><span>dominant</span></div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="panel" aria-live="off">
+          <div>
+            <div class="label"><span>Era snapshot</span><span id="eraRange">&mdash;</span></div>
+            <div class="card era">
+              <div class="q-block">
+                <div class="q"><span class="tag">THEMES</span><span>What is this era about?</span></div>
+                <div class="bars compact" id="eraThemeBars"></div>
+              </div>
+              <div class="q-block">
+                <div class="q"><span class="tag">REGION</span><span>Where is it happening?</span></div>
+                <div class="bars compact" id="eraRegionBars"></div>
+              </div>
+              <div class="q-block">
+                <div class="q"><span class="tag">MOOD</span><span>Building or breaking?</span></div>
+                <div class="bars compact" id="eraMoodBars"></div>
+              </div>
+              <div class="impact" id="eraImpact"></div>
+              <div class="conf"><span id="eraConf">conf &mdash;</span><span id="eraN">0 events</span></div>
+            </div>
+          </div>
+          <div>
+            <div class="label"><span>Judgments</span><span>newest first</span></div>
+            <div class="stream" id="stream"></div>
+          </div>
+        </aside>
+      </section>
+    </div>
+  </div>
+
+  <section class="live">
+    <div>
+      <h2>Try it live</h2>
+      <p>Type any event and see how it's read.</p>
+      <label class="label" for="live" style="margin-bottom:6px">Your event</label>
+      <input id="live" type="text" autocomplete="off" value="1066, Battle of Hastings: William the Conqueror, blessed by the Pope, defeats Harold" />
+      <div class="chips" id="chips">
+        <button type="button">1455: Gutenberg prints the Bible</button>
+        <button type="button">1929: Wall Street crashes</button>
+        <button type="button">My grandmother's village floods, 1953</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="q"><span class="tag">THEMES</span><span>What is this event about?</span></div>
+      <div class="bars" id="liveBars"></div>
+      <div class="impact" id="liveImpact"></div>
+      <div class="conf"><span id="liveReal">real event? &mdash;</span></div>
+    </div>
+  </section>
+</div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
