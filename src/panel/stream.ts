@@ -1,4 +1,8 @@
 // The "judgments" event-card stream. Ported from reel.html's `eventCard`.
+// Now its own scroll container (see .stream in main.css): newest cards
+// still prepend at the top, but if the user has scrolled down to read
+// older ones, a prepend compensates the scroll position so their view
+// doesn't jump — see the wasScrolledAway/scrollTop adjustment in add().
 import { THEMES, IMPACT_LABELS } from "../data/types";
 import type { HistoryEvent } from "../data/types";
 import { fmtYear } from "../data/timescale";
@@ -14,12 +18,17 @@ interface StreamEntry {
   textEl: HTMLElement;
 }
 
+/** How close to the top counts as "at the top" for scroll-preservation
+ * purposes — a few px of slop so normal momentum/rounding doesn't count as
+ * "scrolled away". */
+const AT_TOP_EPSILON_PX = 4;
+
 export class EventStream {
   private readonly container: HTMLElement;
   private readonly maxCards: number;
   private entries: StreamEntry[] = [];
 
-  constructor(container: HTMLElement, maxCards = 3) {
+  constructor(container: HTMLElement, maxCards = 60) {
     this.container = container;
     this.maxCards = maxCards;
   }
@@ -35,8 +44,19 @@ export class EventStream {
     const textEl = el.querySelector<HTMLElement>(".ev-text");
     if (!barsEl || !textEl) throw new Error("EventStream: card template missing .bars/.ev-text");
     const rows = makeBars(barsEl, THEMES);
+
+    const wasScrolledAway = this.container.scrollTop > AT_TOP_EPSILON_PX;
+    const heightBefore = this.container.scrollHeight;
     this.container.prepend(el);
     this.entries.unshift({ idx: e.idx, el, textEl });
+    if (wasScrolledAway) {
+      // A newest-first prepend otherwise reads as everything sliding down
+      // and the view snapping toward the top; compensate scrollTop by
+      // exactly how much taller the list just got so whatever the user was
+      // reading stays put.
+      this.container.scrollTop += this.container.scrollHeight - heightBefore;
+    }
+
     while (this.entries.length > this.maxCards) {
       this.entries.pop();
       this.container.lastElementChild?.remove();
@@ -58,9 +78,12 @@ export class EventStream {
     this.entries = [];
   }
 
-  /** Rebuilds the stream after a scrub, oldest first so the newest ends on top. */
+  /** Rebuilds the stream after a scrub, oldest first so the newest ends on
+   * top — always resets to the top since this is a fresh jump, not a live
+   * feed the user might have scrolled away from. */
   setRecent(events: readonly HistoryEvent[]): void {
     this.clear();
     for (const e of events) this.add(e);
+    this.container.scrollTop = 0;
   }
 }

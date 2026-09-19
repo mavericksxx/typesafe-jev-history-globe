@@ -28,9 +28,6 @@ export const REGIONS = [
 ] as const;
 export type Region = (typeof REGIONS)[number];
 
-export const MOODS = ["expansion", "stability", "upheaval", "collapse"] as const;
-export type Mood = (typeof MOODS)[number];
-
 export const IMPACT_LABELS = ["local", "regional", "generational", "world"] as const;
 
 export type LocKind = "point" | "country" | "none";
@@ -98,8 +95,6 @@ export interface LandmarkEvent {
 export interface EraSnapshot {
   themes: Record<Theme, number>;
   ext: Record<ExtTheme, number>;
-  region: Record<Region, number>;
-  mood: Record<Mood, number>;
   impact: number;
   /** Number of events that fed the window. */
   n: number;

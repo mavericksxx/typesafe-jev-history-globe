@@ -1,7 +1,7 @@
 // Era-bars math (ported from reel.html's `eraTarget`), operating over an
 // already-bisected slice of the index rather than filtering all events.
-import { THEMES, EXT_THEMES, REGIONS } from "./types";
-import type { EraSnapshot, HistoryEvent, Theme, ExtTheme, Region, EraTheme } from "./types";
+import { THEMES, EXT_THEMES } from "./types";
+import type { EraSnapshot, HistoryEvent, Theme, ExtTheme, EraTheme } from "./types";
 
 const THEME_SET: ReadonlySet<string> = new Set(THEMES);
 
@@ -13,18 +13,11 @@ export function eraThemeValue(snapshot: EraSnapshot, t: EraTheme): number {
 /** How far back (in T-space) the era window looks, matching the mockup. */
 export const ERA_WINDOW = 0.05;
 
-function clamp01(v: number): number {
-  return Math.max(0, Math.min(1, v));
-}
-
 function zeroThemeRecord(): Record<Theme, number> {
   return Object.fromEntries(THEMES.map((t) => [t, 0])) as Record<Theme, number>;
 }
 function zeroExtRecord(): Record<ExtTheme, number> {
   return Object.fromEntries(EXT_THEMES.map((t) => [t, 0])) as Record<ExtTheme, number>;
-}
-function zeroRegionRecord(): Record<Region, number> {
-  return Object.fromEntries(REGIONS.map((r) => [r, 0])) as Record<Region, number>;
 }
 
 /**
@@ -42,7 +35,6 @@ export function computeEraSnapshot(
 ): EraSnapshot {
   const themes = zeroThemeRecord();
   const ext = zeroExtRecord();
-  const region = zeroRegionRecord();
   let wsum = 0;
   let imp = 0;
   let n = 0;
@@ -55,29 +47,15 @@ export function computeEraSnapshot(
     imp += e.impact * w;
     for (const t of THEMES) themes[t] += e.th[t] * w;
     for (const t of EXT_THEMES) ext[t] += e.ext[t] * w;
-    region[e.region] += w;
   }
   if (wsum) {
     for (const t of THEMES) themes[t] /= wsum;
     for (const t of EXT_THEMES) ext[t] /= wsum;
   }
-  // Share of the window's total weight (not share of the top region), so an
-  // empty region reads as 0 instead of every region racing toward the max.
-  const regionRel = zeroRegionRecord();
-  for (const r of REGIONS) regionRel[r] = wsum ? region[r] / wsum : 0;
-
-  const mood = {
-    expansion: clamp01(0.5 * ext.empire + 0.3 * ext.exploration + 0.2 * themes.economy),
-    stability: clamp01(0.55 * themes.politics + 0.3 * (1 - themes.war) + 0.15 * (1 - ext.revolution)),
-    upheaval: clamp01(0.5 * themes.war + 0.35 * ext.revolution + 0.15 * ext.disaster),
-    collapse: clamp01(0.55 * ext.disaster + 0.3 * themes.war - 0.15 * themes.economy),
-  };
 
   return {
     themes,
     ext,
-    region: regionRel,
-    mood,
     impact: wsum ? imp / wsum : 0,
     n,
     lo,

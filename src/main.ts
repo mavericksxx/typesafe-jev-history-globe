@@ -235,11 +235,6 @@ async function boot(): Promise<void> {
 
   const eraPanel = new EraPanel({
     themeBars: byId("eraThemeBars"),
-    regionBars: byId("eraRegionBars"),
-    moodBars: byId("eraMoodBars"),
-    impact: byId("eraImpact"),
-    conf: byId("eraConf"),
-    n: byId("eraN"),
     range: byId("eraRange"),
   });
 

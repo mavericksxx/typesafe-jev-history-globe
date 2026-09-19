@@ -1,5 +1,5 @@
 // Moving-bar DOM widgets shared by the era panel, event cards, and the live
-// panel. Ported from reel.html's makeBars/setBars/setBarsRanked/makeImpact.
+// panel. Ported from reel.html's makeBars/setBars/makeImpact.
 import { IMPACT_LABELS } from "../data/types";
 
 export interface BarRow<K extends string> {
@@ -39,18 +39,6 @@ export function setBars<K extends string>(rows: readonly BarRow<K>[], vals: Reco
     r.num.textContent = v.toFixed(2);
     r.row.classList.toggle("win", r.key === top);
   }
-  return top;
-}
-
-export function setBarsRanked<K extends string>(
-  container: HTMLElement,
-  rows: readonly BarRow<K>[],
-  vals: Record<K, number>
-): K {
-  const top = setBars(rows, vals);
-  [...rows]
-    .sort((a, b) => vals[b.key] - vals[a.key])
-    .forEach((r) => container.appendChild(r.row));
   return top;
 }
 

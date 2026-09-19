@@ -152,6 +152,16 @@ h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; ma
   /* three columns (narrative + globe + panel) get cramped here; stack the panel under the globe instead */
   .stage { grid-template-columns: minmax(0, 1fr); }
 }
+@media (min-width: 1241px) {
+  /* Only in the true 3-column layout (globe and panel side by side, both
+     inside the sticky stage-col) does "fill down to the bottom of the
+     viewport" make sense — below this, the panel stacks under the globe
+     within the same sticky column, so its height can't be pinned to the
+     viewport independent of the globe's own height above it (see the
+     .stream max-height fallback above, which covers that case). */
+  .panel { height: calc(100vh - 52px - env(safe-area-inset-top, 0px) - 18px); }
+  .stream { max-height: none; flex: 1 1 auto; }
+}
 /* Tightened from 48vh (per the approved comet-trail reference, which uses
    172px/16px so about two eras fit in a viewport at once) — the
    IntersectionObserver in narrative/index.ts syncs off a viewport-centre
@@ -221,8 +231,15 @@ h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; ma
 .stats span { font-size: 10.5px; color: var(--ink-2); }
 
 /* jev panel */
-.panel { display: grid; gap: 16px; }
-.label { font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); display: flex; justify-content: space-between; gap: 8px; background: var(--paper); background: color-mix(in srgb, var(--paper) 90%, transparent); padding: 6px 10px; border-radius: 6px; box-sizing: border-box; }
+.panel { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+.era-summary { flex: none; }
+/* Judgments: its own scroll container. By default (narrow layouts, or
+   whenever the stage stacks — see the max-width:1240px override below) it
+   just gets a sensible cap; on the wide 3-column desktop layout further
+   down, .panel gets an explicit height against the viewport and this
+   switches to flex-filling whatever's left below the era card. */
+.judgments { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; position: relative; }
+.label { font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); display: flex; justify-content: space-between; gap: 8px; background: var(--paper); background: color-mix(in srgb, var(--paper) 90%, transparent); padding: 6px 10px; border-radius: 6px; box-sizing: border-box; flex: none; }
 .card { border: 1px solid var(--ink); border-radius: 6px; padding: 12px 14px; background: var(--paper); }
 .card.era { border-width: 1.5px; }
 .q { font-family: var(--mono); font-size: 11.5px; display: flex; gap: 8px; align-items: baseline; margin-bottom: 10px; line-height: 1.35; }
@@ -240,7 +257,35 @@ h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; ma
 .impact div { font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); text-align: center; }
 .impact i { display: block; height: 6px; border: 1px solid var(--ink); border-radius: 2px; margin-bottom: 3px; background: var(--paper); transition: background 0.4s; }
 .impact i.on { background: var(--ox); border-color: var(--ox); }
-.stream { display: grid; gap: 10px; }
+.stream {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 0;
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ox) transparent;
+}
+.stream::-webkit-scrollbar { width: 6px; }
+.stream::-webkit-scrollbar-track { background: transparent; }
+.stream::-webkit-scrollbar-thumb { background: var(--ox); border-radius: 3px; }
+/* Bottom fade hinting there's more to scroll to — a mask, so it doesn't
+   dim the last card's own colour, just soft-clips it. */
+.judgments::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 6px;
+  bottom: 0;
+  height: 28px;
+  background: linear-gradient(rgba(0, 0, 0, 0), var(--void));
+  opacity: 0.85;
+  pointer-events: none;
+}
 .stream .card { animation: in 0.45s ease-out; }
 .stream .card:nth-child(n + 2) { opacity: 0.72; }
 .stream .card:nth-child(n + 3) { opacity: 0.45; }
@@ -249,17 +294,12 @@ h1 { font-weight: 400; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1; ma
 @keyframes in { from { transform: translateY(-8px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .stream .card { animation: none; } .fill { transition: none; } }
 
-/* era snapshot: several compact question blocks, Doom-panel style */
+/* era snapshot: the THEMES question block, Doom-panel style */
 .q-block .q { margin-bottom: 4px; font-size: 10.5px; }
-.q-block + .q-block { border-top: 1px dashed var(--rule); padding-top: 9px; margin-top: 9px; }
 .bars.compact { gap: 3px; }
 .bars.compact .bar { grid-template-columns: 68px 1fr 28px; gap: 6px; font-size: 9.5px; }
 .bars.compact .bar > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bars.compact .track { height: 6px; }
-@media (max-width: 600px) {
-  #eraRegionBars .bar:nth-child(n + 5) { display: none; }
-  #eraMoodBars .bar:nth-child(n + 3) { display: none; }
-}
 
 /* live */
 .live { border-top: 1px solid var(--rule); padding-top: 22px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 28px; }

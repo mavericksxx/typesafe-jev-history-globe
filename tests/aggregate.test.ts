@@ -43,7 +43,6 @@ describe("computeEraSnapshot", () => {
     expect(snap.n).toBe(0);
     expect(snap.impact).toBe(0);
     for (const t of THEMES) expect(snap.themes[t]).toBe(0);
-    for (const r of Object.values(snap.region)) expect(r).toBe(0);
   });
 
   it("a single event right at pos dominates its own theme fully", () => {
@@ -53,8 +52,6 @@ describe("computeEraSnapshot", () => {
     expect(snap.n).toBe(1);
     expect(snap.themes.war).toBeCloseTo(1);
     expect(snap.impact).toBeCloseTo(3);
-    expect(snap.region.africa).toBeCloseTo(1);
-    expect(snap.region.europe).toBe(0);
   });
 
   it("weights minor events less than major ones", () => {
@@ -75,16 +72,6 @@ describe("computeEraSnapshot", () => {
     // Adding a heavily-decayed older event of the same theme barely moves the average.
     expect(snapBoth.themes.culture).toBeLessThanOrEqual(snapRecentOnly.themes.culture);
     expect(snapBoth.themes.culture).toBeGreaterThan(0.5);
-  });
-
-  it("keeps mood values within [0, 1]", () => {
-    const pos = 0.5;
-    const chaos = makeEvent({ t: pos, th: zeroTheme({ war: 1 }), ext: zeroExt({ disaster: 1, revolution: 1 }) });
-    const snap = snapshotOf([chaos], pos, pos - ERA_WINDOW);
-    for (const v of Object.values(snap.mood)) {
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThanOrEqual(1);
-    }
   });
 
   it("only looks at events within [start, end), never outside it", () => {
