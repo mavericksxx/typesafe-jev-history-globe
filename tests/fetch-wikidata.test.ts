@@ -15,12 +15,24 @@ describe("parseWikidataYear", () => {
     expect(parseWikidataYear("+1945-08-06T00:00:00Z")).toBe(1945);
   });
 
-  it("parses a BC date as a negative year", () => {
-    expect(parseWikidataYear("-002600-01-01T00:00:00Z")).toBe(-2600);
+  it("parses a BC date as a negative year, correcting Wikidata's astronomical-year offset", () => {
+    // Astronomical year -2600 is 2601 BC (year 0 = 1 BC), not 2600 BC.
+    expect(parseWikidataYear("-002600-01-01T00:00:00Z")).toBe(-2601);
   });
 
-  it("parses a short-padded BC year", () => {
-    expect(parseWikidataYear("-500-06-01T00:00:00Z")).toBe(-500);
+  it("parses a short-padded BC year, correcting the astronomical-year offset", () => {
+    expect(parseWikidataYear("-500-06-01T00:00:00Z")).toBe(-501);
+  });
+
+  it("pins the real observed Wikidata literal for the Battle of Marathon (Q31900), commonly dated 490 BC", () => {
+    // Verified live 2026-09-20: wd:Q31900 wdt:P585 = "-0489-09-07T00:00:00Z".
+    // Astronomical year -489 = 490 BC.
+    expect(parseWikidataYear("-0489-09-07T00:00:00Z")).toBe(-490);
+  });
+
+  it("maps astronomical year 0 to 1 BC", () => {
+    expect(parseWikidataYear("+0000-01-01T00:00:00Z")).toBe(-1);
+    expect(parseWikidataYear("-0000-01-01T00:00:00Z")).toBe(-1);
   });
 
   it("defaults to CE when the endpoint omits the leading sign", () => {
@@ -73,10 +85,13 @@ describe("classifyTheme", () => {
 });
 
 describe("bindingToRecord", () => {
+  // Real observed values for Q31900 (Battle of Marathon), verified live
+  // 2026-09-20: wdt:P585 = "-0489-09-07T00:00:00Z" (astronomical year -489
+  // = 490 BC, see parseWikidataYear).
   const base = {
-    item: { value: "http://www.wikidata.org/entity/Q1747689" },
+    item: { value: "http://www.wikidata.org/entity/Q31900" },
     itemLabel: { value: "Battle of Marathon" },
-    date: { value: "-000490-09-12T00:00:00Z" },
+    date: { value: "-0489-09-07T00:00:00Z" },
     coord: { value: "Point(23.97 38.12)" },
     article: { value: "https://en.wikipedia.org/wiki/Battle_of_Marathon" },
   };
@@ -87,7 +102,7 @@ describe("bindingToRecord", () => {
     expect(rec!.year).toBe(-490);
     expect(rec!.lat).toBeCloseTo(38.12);
     expect(rec!.lon).toBeCloseTo(23.97);
-    expect(rec!.qid).toBe("Q1747689");
+    expect(rec!.qid).toBe("Q31900");
     expect(rec!.source).toBe("https://en.wikipedia.org/wiki/Battle_of_Marathon");
     expect(rec!.real).toBe(true);
   });
@@ -95,7 +110,11 @@ describe("bindingToRecord", () => {
   it("falls back to the Wikidata entity URL when no article is linked", () => {
     const { article, ...rest } = base;
     const rec = bindingToRecord(rest);
-    expect(rec!.source).toBe("https://www.wikidata.org/wiki/Q1747689");
+    expect(rec!.source).toBe("https://www.wikidata.org/wiki/Q31900");
+  });
+
+  it("drops a binding whose label never resolved past the bare QID", () => {
+    expect(bindingToRecord({ ...base, itemLabel: { value: "Q31900" } })).toBeNull();
   });
 
   it("drops a binding missing a date", () => {
@@ -147,6 +166,38 @@ describe("resolveQuotas", () => {
     const ceilings = PERIODS.map(() => Number.MAX_SAFE_INTEGER);
     const quotas = resolveQuotas(25_000, PERIODS, ceilings);
     expect(quotas.reduce((a, b) => a + b, 0)).toBeCloseTo(25_000, -1);
+  });
+
+  it("sums to exactly the target via largest-remainder rounding when supply is unlimited", () => {
+    const ceilings = PERIODS.map(() => Number.MAX_SAFE_INTEGER);
+    // A target that doesn't divide evenly against every period's weight, so
+    // independent per-period rounding would drift from the target.
+    const quotas = resolveQuotas(9_999, PERIODS, ceilings);
+    expect(quotas.reduce((a, b) => a + b, 0)).toBe(9_999);
+  });
+});
+
+describe("markMinor", () => {
+  it("marks roughly the top 2% by sitelinks as non-minor and the rest minor", async () => {
+    const { markMinor } = await import("../scripts/fetch-wikidata");
+    const events = Array.from({ length: 100 }, (_, i) => ({
+      year: 2000,
+      text: `Event ${i}`,
+      lat: 0,
+      lon: 0,
+      locKind: "point" as const,
+      th: { war: 0, politics: 0, religion: 0, economy: 0, science: 0, culture: 0 },
+      impact: 1.5,
+      real: true,
+      minor: true,
+      qid: `Q${i}`,
+      sitelinks: 100 - i, // Q0 is the most notable
+    }));
+    const marked = markMinor(events);
+    const nonMinor = marked.filter((e) => !e.minor);
+    expect(nonMinor.length).toBeGreaterThan(0);
+    expect(nonMinor.length).toBeLessThan(10);
+    expect(nonMinor.every((e) => (e.sitelinks ?? 0) >= 90)).toBe(true);
   });
 });
 

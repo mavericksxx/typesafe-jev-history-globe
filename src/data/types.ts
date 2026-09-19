@@ -78,6 +78,16 @@ export interface RawEventRecord {
   qid?: string;
   /** Citation URL (Wikipedia article or Wikidata entity), when sourced from Wikidata. */
   source?: string;
+  /** Wikipedia sitelink count at fetch time — a cheap notability/impact prior
+   * for Wikidata-sourced records. Kept on the record (rather than stripped
+   * before disk) so a future impact-scoring pass can use it without
+   * re-fetching; build-data.ts does not currently read it. */
+  sitelinks?: number;
+  /** Wikidata time precision for the event's date, on Wikibase's 0-14 scale
+   * (9 = year, 10 = month, 11 = day; below 9 means century/millennium/etc).
+   * Kept rather than dropped so low-precision ancient dates aren't silently
+   * discarded — a future UI/LLM pass can hedge display for precision < 9. */
+  datePrecision?: number;
 }
 
 /**
