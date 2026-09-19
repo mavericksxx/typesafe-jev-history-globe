@@ -34,6 +34,7 @@ import {
   GALAXY_IDS,
   GALAXY_THEMES,
   DEFAULT_GALAXY_ID,
+  THEME_COLORS,
   isGalaxyId,
   getGalaxyTheme,
   applyGalaxyCssVars,
@@ -256,11 +257,9 @@ async function boot(): Promise<void> {
     eraPanel,
     stream,
     els: {
-      yearChip: byId("yearChip"),
       hover: byId("hover"),
       sEvents: byId("sEvents"),
       sCalls: byId("sCalls"),
-      sCost: byId("sCost"),
       sTheme: byId("sTheme"),
     },
     ensureText,
@@ -372,7 +371,7 @@ async function boot(): Promise<void> {
 
   // ---------- live (mock Jev judge) ----------
   const liveInput = byId("live") as HTMLInputElement;
-  const liveRows = makeBars(byId("liveBars"), THEMES);
+  const liveRows = makeBars(byId("liveBars"), THEMES, THEME_COLORS);
   const liveImpactCells = makeImpact(byId("liveImpact"));
   const liveRealEl = byId("liveReal");
   let liveTimer: ReturnType<typeof setTimeout> | undefined;

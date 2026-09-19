@@ -4,7 +4,7 @@
 // and the globe/timeline only redraw when their dirty flag is set.
 import { eventIndex, boundToMostRecent } from "./data";
 import { computeEraSnapshot, ERA_WINDOW } from "./data/aggregate";
-import { fmtYear, T } from "./data/timescale";
+import { fmtYear } from "./data/timescale";
 import type { HistoryEvent } from "./data/types";
 import {
   getState,
@@ -27,7 +27,6 @@ import { CometRail } from "./narrative/comet";
 import { EraPanel } from "./panel/era";
 import { EventStream } from "./panel/stream";
 import { getGalaxyTheme } from "./themes";
-import { THEME_COLORS } from "./themes";
 
 const REEL_SECONDS = 150;
 /** A narrative-scroll jump bigger than this fraction of T-space (or any
@@ -50,11 +49,9 @@ const PULSE_LIFETIME_MS = 1400;
 const MAX_ERA_EVENTS = 4000;
 
 export interface LoopEls {
-  yearChip: HTMLElement;
   hover: HTMLElement;
   sEvents: HTMLElement;
   sCalls: HTMLElement;
-  sCost: HTMLElement;
   sTheme: HTMLElement;
 }
 
@@ -348,7 +345,6 @@ export class Loop {
 
     if (afterFocus.dirty.timeline) {
       this.deps.timeline.render(afterFocus.pos, afterFocus.accent);
-      this.deps.els.yearChip.textContent = fmtYear(Math.round(T.invert(afterFocus.pos)));
     }
 
     if (now - this.lastGalaxyDraw >= GALAXY_FRAME_MS) {
@@ -366,9 +362,10 @@ export class Loop {
     this.deps.els.sEvents.textContent = afterFocus.idx.toLocaleString();
     const judged = afterFocus.calls + Math.floor(afterFocus.pos * 40);
     this.deps.els.sCalls.textContent = judged.toLocaleString();
-    this.deps.els.sCost.textContent = `$${(judged * 0.0000193).toFixed(5)}`;
+    // The dominant stat is always accent-coloured (see #sTheme in
+    // main.css), not tinted per winning theme — colour in this stats row
+    // is reserved for the bar fills, not the summary text.
     this.deps.els.sTheme.textContent = afterFocus.idx ? topTheme : "—";
-    this.deps.els.sTheme.style.color = afterFocus.idx ? THEME_COLORS[topTheme] : "";
 
     clearDirty();
     this.raf = requestAnimationFrame(this.frame);

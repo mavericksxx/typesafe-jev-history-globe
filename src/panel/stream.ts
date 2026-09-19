@@ -6,6 +6,7 @@
 import { THEMES, IMPACT_LABELS } from "../data/types";
 import type { HistoryEvent } from "../data/types";
 import { fmtYear } from "../data/timescale";
+import { THEME_COLORS } from "../themes";
 import { makeBars, setBars } from "./bars";
 
 function escapeHtml(s: string): string {
@@ -66,7 +67,7 @@ export class EventStream {
     const barsEl = el.querySelector<HTMLElement>(".bars");
     const textEl = el.querySelector<HTMLElement>(".ev-text");
     if (!barsEl || !textEl) throw new Error("EventStream: card template missing .bars/.ev-text");
-    const rows = makeBars(barsEl, THEMES);
+    const rows = makeBars(barsEl, THEMES, THEME_COLORS);
 
     const wasScrolledAway = this.container.scrollTop > AT_TOP_EPSILON_PX;
     const heightBefore = this.container.scrollHeight;
