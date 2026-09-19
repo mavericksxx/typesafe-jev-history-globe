@@ -1,1 +1,7 @@
 .env
+node_modules
+dist
+data/raw/*.ndjson
+!data/raw/sample.ndjson
+.DS_Store
+*.tsbuildinfo

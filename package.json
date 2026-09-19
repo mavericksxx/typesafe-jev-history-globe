@@ -1,0 +1,33 @@
+{
+  "name": "epochs",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "gen-synthetic": "tsx scripts/gen-synthetic.ts",
+    "build-data": "tsx scripts/build-data.ts",
+    "deploy": "wrangler pages deploy dist --project-name epochs"
+  },
+  "dependencies": {
+    "d3-array": "^3.2.4",
+    "d3-geo": "^3.1.1",
+    "d3-scale": "^4.0.2",
+    "topojson-client": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/d3-array": "^3.2.2",
+    "@types/d3-geo": "^3.1.1",
+    "@types/d3-scale": "^4.0.9",
+    "@types/topojson-client": "^3.1.5",
+    "typescript": "^5.7.0",
+    "tsx": "^4.23.13",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8",
+    "wrangler": "^4.135.0",
+    "world-atlas": "^2.0.2"
+  }
+}

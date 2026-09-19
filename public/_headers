@@ -1,0 +1,13 @@
+# Hashed build assets (Vite fingerprints these) can be cached forever.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Data shards and the columnar index are content-addressed by index range and
+# don't change after a build, so they're safe to cache hard too.
+/data/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# manifest.json is the one file that can change between deploys without a
+# filename change (new shard list, new totalEvents) — keep it short-lived.
+/data/manifest.json
+  Cache-Control: public, max-age=300, must-revalidate
