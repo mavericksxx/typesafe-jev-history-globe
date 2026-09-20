@@ -55,7 +55,11 @@ export const EVENT_TARGET = 50_000;
 
 /** Be polite to a shared public endpoint: minimum gap between live HTTP
  * requests (cached reads are instant and don't count against this). */
-const RATE_LIMIT_MS = 4000;
+// 4s was too aggressive for WDQS in practice: nearly every request drew a 429,
+// and each one costs a 120s Retry-After backoff, so the run went *slower* than
+// a politer gap would. 12s avoids most 429s and finishes sooner in wall-clock
+// terms — the backoff penalty dwarfs the extra delay.
+const RATE_LIMIT_MS = 12000;
 
 /** One slice of the 3000 BC - present timeline, with the fraction of
  * EVENT_TARGET it's entitled to. Weights sum to 1. Skewed toward modern
