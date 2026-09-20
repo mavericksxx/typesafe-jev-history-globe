@@ -93,6 +93,14 @@ export interface DensityCell {
 /** Pure prep pass over the fixed cell grid (LON_CELLS*LAT_CELLS = 648 cells
  * regardless of dataset size) — cheap enough to run every frame, and safe to
  * call from Node for the perf test. */
+/** With the real (15.7k-event) dataset, ancient eras light up only a
+ * handful of the 648 cells — the glow registers but reads as faint dust
+ * rather than an accumulating trail. Below this many active cells, boost
+ * both spread and intensity so the sparse glow stays legible. */
+const SPARSE_ACTIVE_CELLS = 20;
+const SPARSE_SIZE_BOOST = 1.6;
+const SPARSE_ALPHA_BOOST = 1.5;
+
 export function prepareDensityCells(grid: DensityGrid, project: Project, cellPixelSize: number): DensityCell[] {
   const out: DensityCell[] = [];
   const snapshot = grid.snapshotCounts();
@@ -114,6 +122,14 @@ export function prepareDensityCells(grid: DensityGrid, project: Project, cellPix
     if (!p) continue;
     const alpha = Math.min(0.5, 0.06 + 0.44 * (cellMax / max));
     out.push({ x: p[0], y: p[1], size: cellPixelSize, theme: dominant, alpha });
+  }
+  // Sparse-era boost: only ever makes an already-sparse glow more visible,
+  // never touches the dense modern eras this was originally tuned for.
+  if (out.length > 0 && out.length <= SPARSE_ACTIVE_CELLS) {
+    for (const c of out) {
+      c.size *= SPARSE_SIZE_BOOST;
+      c.alpha = Math.min(0.7, c.alpha * SPARSE_ALPHA_BOOST);
+    }
   }
   return out;
 }

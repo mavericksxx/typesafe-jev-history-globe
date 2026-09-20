@@ -5,7 +5,7 @@
 import type { GeoProjection, GeoPath } from "d3-geo";
 import { createProjection, fitProjection, graticule } from "./projection";
 import { land } from "./land";
-import { prepareDots, paintDots, drawPulses, makeProjector } from "./dots";
+import { prepareDots, paintDots, drawPulses, makeProjector, sparseAlphaFloor } from "./dots";
 import type { Pulse, Project } from "./dots";
 import { DensityGrid, prepareDensityCells, paintDensityCells } from "./density";
 import { THEME_COLORS } from "../themes";
@@ -215,7 +215,7 @@ export class Globe {
 
     // 5) live windowed dots + pulses, drawn last so they sit above the glow
     const dots = prepareDots(opts.all, opts.dotStart, opts.dotEnd, opts.pos, project);
-    paintDots(ctx, dots, DOT_COLORS, opts.accent);
+    paintDots(ctx, dots, DOT_COLORS, opts.accent, sparseAlphaFloor(opts.dotEnd - opts.dotStart));
     drawPulses(ctx, opts.pulses, opts.now, project, DOT_COLORS);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);

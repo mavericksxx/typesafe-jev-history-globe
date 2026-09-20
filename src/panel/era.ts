@@ -22,6 +22,10 @@ export interface EraUpdateOpts {
   now: number;
 }
 
+/** Below this many events in the era window, the range line names the count
+ * rather than leaving a thin bar chart to look like a rendering bug. */
+const SPARSE_ERA_EVENTS = 30;
+
 function zero<K extends string>(keys: readonly K[]): Record<K, number> {
   return Object.fromEntries(keys.map((k) => [k, 0])) as Record<K, number>;
 }
@@ -47,7 +51,11 @@ export class EraPanel {
     }
     const topTheme = setBars(this.themeRows, this.cur);
 
-    this.els.range.textContent = `${fmtYear(Math.round(T.invert(Math.max(0, snapshot.lo))))} – ${fmtYear(Math.round(T.invert(pos)))}`;
+    const range = `${fmtYear(Math.round(T.invert(Math.max(0, snapshot.lo))))} – ${fmtYear(Math.round(T.invert(pos)))}`;
+    // Ancient eras are genuinely sparse in the real (Wikidata-sourced) corpus
+    // — not a bug. Below this, say so instead of leaving it to look broken.
+    this.els.range.textContent =
+      snapshot.n > 0 && snapshot.n < SPARSE_ERA_EVENTS ? `${range} · ${snapshot.n} events recorded` : range;
 
     return topTheme;
   }

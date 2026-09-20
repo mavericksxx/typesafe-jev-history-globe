@@ -404,7 +404,8 @@ export class Loop {
     }
     el.hidden = false;
     const render = (text: string): void => {
-      el.innerHTML = `${fmtYear(hovered.year)} · ${escapeHtml(text)}<small>${hovered.top} ${hovered.th[hovered.top].toFixed(2)} · impact ${hovered.impact.toFixed(1)}</small>`;
+      const approx = hovered.locKind === "country" ? " · approximate location" : "";
+      el.innerHTML = `${fmtYear(hovered.year)} · ${escapeHtml(text)}<small>${hovered.top} ${hovered.th[hovered.top].toFixed(2)} · impact ${hovered.impact.toFixed(1)}${approx}</small>`;
     };
     // The globe is dirty most frames (idle spin), but the hovered event only
     // actually changes on a pointermove — skip re-rendering the DOM otherwise.
