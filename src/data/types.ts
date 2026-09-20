@@ -88,6 +88,11 @@ export interface RawEventRecord {
    * Kept rather than dropped so low-precision ancient dates aren't silently
    * discarded — a future UI/LLM pass can hedge display for precision < 9. */
   datePrecision?: number;
+  /** Jev's confidence (0..1) in its `impact`/`th` judgment for this event,
+   * from scripts/score-events.ts's "impact" question. Absent for events not
+   * yet scored by Jev (build-data.ts falls back to a mocked confidence for
+   * those, matching its pre-Jev behaviour) or for synthetic/mock records. */
+  confidence?: number;
 }
 
 /**

@@ -163,9 +163,13 @@ function buildColumnar(records: RawEventRecord[]): { columnar: ColumnarIndex; te
   for (const r of records) {
     const ext = deriveExtra(r.text, r.th, rng);
     const region = regionOf(r.lat, r.lon);
-    // Mock confidence: high-impact / hand-authored events read as confident;
-    // filler events get a wider, noisier spread — stands in for Jev's conf.
-    const conf = Math.max(0.15, Math.min(0.99, (r.real ? 0.82 : 0.55) + (rng() - 0.5) * 0.3));
+    // Real Jev confidence (scripts/score-events.ts) wins when present; events
+    // not yet scored fall back to the old mock — high-impact / hand-authored
+    // events read as confident, filler events get a wider, noisier spread.
+    const conf =
+      r.confidence !== undefined
+        ? r.confidence
+        : Math.max(0.15, Math.min(0.99, (r.real ? 0.82 : 0.55) + (rng() - 0.5) * 0.3));
 
     columnar.year.push(r.year);
     columnar.lat.push(round2(r.lat));
