@@ -1,6 +1,5 @@
-// Moving-bar DOM widgets shared by the era panel, event cards, and the live
-// panel. Ported from reel.html's makeBars/setBars/makeImpact.
-import { IMPACT_LABELS } from "../data/types";
+// Moving-bar DOM widgets shared by the era panel and event cards. Ported
+// from reel.html's makeBars/setBars.
 
 export interface BarRow<K extends string> {
   key: K;
@@ -42,11 +41,3 @@ export function setBars<K extends string>(rows: readonly BarRow<K>[], vals: Reco
   return top;
 }
 
-export function makeImpact(el: HTMLElement): HTMLElement[] {
-  el.innerHTML = IMPACT_LABELS.map((l) => `<div><i></i>${l}</div>`).join("");
-  return [...el.querySelectorAll<HTMLElement>("i")];
-}
-
-export function setImpact(cells: readonly HTMLElement[], score: number): void {
-  cells.forEach((c, i) => c.classList.toggle("on", i <= Math.round(score)));
-}

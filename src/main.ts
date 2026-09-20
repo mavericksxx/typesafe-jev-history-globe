@@ -4,7 +4,6 @@ import "./styles/main.css";
 import { eventIndex } from "./data";
 import { computeHistogram } from "./data/aggregate";
 import { T } from "./data/timescale";
-import { THEMES } from "./data/types";
 import { loadManifest, loadColumnarIndex, loadEras, loadLandmarks, eventsFromColumnar, createTextResolver } from "./data/loader";
 import {
   getState,
@@ -26,17 +25,14 @@ import { Timeline, TL_COLS } from "./timeline";
 import { GalaxyBackdrop } from "./galaxy/backdrop";
 import { EraPanel } from "./panel/era";
 import { EventStream } from "./panel/stream";
-import { makeBars, setBars, makeImpact, setImpact } from "./panel/bars";
 import { renderNarrative, observeNarrative } from "./narrative";
 import { CometRail } from "./narrative/comet";
 import { ReelScroll } from "./narrative/reelScroll";
-import { judge } from "./live/judge";
 import { Loop } from "./loop";
 import {
   GALAXY_IDS,
   GALAXY_THEMES,
   DEFAULT_GALAXY_ID,
-  THEME_COLORS,
   isGalaxyId,
   getGalaxyTheme,
   applyGalaxyCssVars,
@@ -425,35 +421,10 @@ async function boot(): Promise<void> {
   });
   globeCanvas.addEventListener("pointerleave", () => setHoverEvent(null));
 
-  // ---------- live (mock Jev judge) ----------
-  const liveInput = byId("live") as HTMLInputElement;
-  const liveRows = makeBars(byId("liveBars"), THEMES, THEME_COLORS);
-  const liveImpactCells = makeImpact(byId("liveImpact"));
-  const liveRealEl = byId("liveReal");
-  let liveTimer: ReturnType<typeof setTimeout> | undefined;
-
-  async function runLiveJudge(): Promise<void> {
-    const answers = await judge(liveInput.value);
-    setBars(liveRows, answers.themes);
-    setImpact(liveImpactCells, Math.max(0, answers.impact));
-    liveRealEl.textContent = `real event? ${answers.real.toFixed(2)}`;
-  }
-  liveInput.addEventListener("input", () => {
-    clearTimeout(liveTimer);
-    liveTimer = setTimeout(() => void runLiveJudge(), 300);
-  });
-  document.querySelectorAll<HTMLButtonElement>("#chips button").forEach((b) => {
-    b.addEventListener("click", () => {
-      liveInput.value = b.textContent ?? "";
-      void runLiveJudge();
-    });
-  });
-
   // ---------- boot at a resting state that already shows content ----------
   setPos(T(1520));
   loop.syncEventsTo(getState().pos, false);
   setRotation(getState().targetRot, getState().targetRot);
-  void runLiveJudge();
   setPlayLabel();
   loop.start();
 }
