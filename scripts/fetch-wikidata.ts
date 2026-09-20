@@ -685,9 +685,19 @@ async function runQuery(query: string, cacheTag: string, endpoint = ENDPOINT): P
       writeFileSync(cacheFile, JSON.stringify(json));
       return json;
     }
-    const retryable = res.status === 429 || res.status === 502 || res.status === 503;
+    // 504 belongs here too: the coordinate query's bounded P131+ rung is
+    // expensive enough that WDQS times out on some batches (observed live
+    // 2026-09-20 on modern war buckets). Omitting it aborted whole runs on a
+    // single slow batch. Callers that can shrink their batch should also
+    // catch TimeoutError and split — see resolveCoords.
+    const retryable =
+      res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504;
     if (!retryable || attempt >= MAX_RETRIES) {
-      throw new Error(`SPARQL query failed (${res.status} ${res.statusText}): ${cacheTag}`);
+      const err = new Error(`SPARQL query failed (${res.status} ${res.statusText}): ${cacheTag}`);
+      // Tag timeouts so a caller holding a splittable batch can retry with a
+      // smaller one instead of failing the run.
+      if (res.status === 504) (err as Error & { isTimeout?: boolean }).isTimeout = true;
+      throw err;
     }
     const retryAfterHeader = Number(res.headers.get("Retry-After"));
     const backoffMs = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
@@ -834,7 +844,22 @@ async function resolveCoords(
   const map = new Map<string, { point: { lat: number; lon: number }; rung: CoordRung }>();
   for (const [i, batch] of chunk(qids, COORD_BATCH_SIZE).entries()) {
     if (batch.length === 0) continue;
-    const json = (await runQuery(buildCoordsQuery(batch), `${cacheTag}-${i}`)) as {
+    await resolveCoordBatch(batch, `${cacheTag}-${i}`, map);
+  }
+  return map;
+}
+
+/** Runs one coordinate batch, halving it and recursing if WDQS times out on
+ * it. A batch that still times out at a single QID is genuinely unresolvable
+ * there, so it's skipped (the caller drops QIDs missing from the map) rather
+ * than aborting the run. */
+async function resolveCoordBatch(
+  batch: string[],
+  cacheTag: string,
+  map: Map<string, { point: { lat: number; lon: number }; rung: CoordRung }>
+): Promise<void> {
+  try {
+    const json = (await runQuery(buildCoordsQuery(batch), cacheTag)) as {
       results: { bindings: CoordBinding[] };
     };
     for (const b of json.results?.bindings ?? []) {
@@ -842,8 +867,17 @@ async function resolveCoords(
       const qid = qidFromUri(b.item.value);
       if (resolved) map.set(qid, resolved);
     }
+  } catch (err) {
+    if (!(err as Error & { isTimeout?: boolean }).isTimeout) throw err;
+    if (batch.length <= 1) {
+      console.warn(`  giving up on ${cacheTag} (single QID still times out); dropping`);
+      return;
+    }
+    const half = Math.ceil(batch.length / 2);
+    console.warn(`  timeout on ${cacheTag}, splitting ${batch.length} -> ${half}+${batch.length - half}`);
+    await resolveCoordBatch(batch.slice(0, half), `${cacheTag}a`, map);
+    await resolveCoordBatch(batch.slice(half), `${cacheTag}b`, map);
   }
-  return map;
 }
 
 /** Runs stage 1 (candidate discovery for one theme bucket) + stage 2
