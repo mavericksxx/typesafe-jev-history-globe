@@ -145,14 +145,14 @@ describe("applyJevAnswer", () => {
     } as const;
     expect(applyJevAnswer(base, lowImpact as never).minor).toBe(true);
 
-    // 2.5 clears the old (too-generous) threshold but not the current one —
-    // pins the pilot-measured MINOR_THRESHOLD=2.9 rather than 2.0.
-    const midImpact = { ...lowImpact, impact: { score: 2.5, confidence: 0.5, probabilities: {} } } as const;
+    // Pins the v2 MINOR_THRESHOLD=2.0 (re-derived in Task 3 from the
+    // reworded impact question's own criteria boundary — see score-events.ts).
+    const midImpact = { ...lowImpact, impact: { score: 1.5, confidence: 0.5, probabilities: {} } } as const;
     expect(applyJevAnswer(base, midImpact as never).minor).toBe(true);
 
     const highImpact = {
       ...lowImpact,
-      impact: { score: 2.95, confidence: 0.5, probabilities: {} },
+      impact: { score: 2.1, confidence: 0.5, probabilities: {} },
     } as const;
     expect(applyJevAnswer(base, highImpact as never).minor).toBe(false);
   });

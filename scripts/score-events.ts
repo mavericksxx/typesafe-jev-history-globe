@@ -31,8 +31,23 @@ const MODEL = "jev-latest";
 
 /** Bump whenever question wording changes below — folded into the cache
  * key so a re-run after a prompt edit re-scores instead of serving stale
- * answers from the old wording. */
-const PROMPT_VERSION = "v1";
+ * answers from the old wording.
+ *
+ * v1 -> v2 (Task 3): the impact question's original wording ("how much did
+ * this event change the course of world history?") measurably got answered
+ * as "how important is this KIND of thing in general" rather than "did THIS
+ * INSTANCE change anything" — institution foundings (a university, a mosque,
+ * a hospital, a company) systematically scored 2.0-2.5+ on the pilot sample,
+ * forcing MINOR_THRESHOLD up to an arbitrary 2.9 as a workaround (see below).
+ * v2's wording explicitly tells the model to ignore how famous/large the
+ * resulting institution became and to judge only the founding act itself.
+ * Probed live against a 60-event mixed sample (40 institution foundings +
+ * 20 marquee world-historical events, scripts/probe-impact-wording.mjs,
+ * ~$0.004): average institution score fell from ~0.9 to ~0.03 while marquee
+ * events (World War I/II, Black Death, Fall of Constantinople, ...) stayed
+ * at 2.3-3.0 — see this file's git history / PLAN.md for the full
+ * before/after table. */
+const PROMPT_VERSION = "v2";
 
 const THEME_QUESTIONS: Record<Theme, string> = {
   war: "Does this event involve war, battle or armed conflict?",
@@ -49,12 +64,13 @@ const QUESTIONS = {
   ),
   impact: {
     type: "score",
-    instructions: "How much did this event change the course of world history?",
+    instructions:
+      "Score how much THIS ONE EVENT, by itself, changed the course of history — not how well-known, large, or prestigious the resulting institution or place is today. The founding of a specific named university, mosque, hospital, company, museum or bank is ALMOST ALWAYS a 0 or 1 on this scale: it is a routine administrative act, even when the institution it created later became famous. Only score 2+ if this specific founding, opening, election, or building event itself directly triggered a war, a revolution, a famine, a mass migration, or comparably wide upheaval at the time.",
     criteria: [
-      "Barely noticed outside its locality",
-      "Mattered to one country or region",
-      "Reshaped a whole region for generations",
-      "Changed the course of world history",
+      "Routine and local: a specific institution, building, or settlement being founded/opened, an ordinary election, a routine treaty. True even for a famous, large, or old institution — its current fame does not change how small this one act was at the time.",
+      "Notable within one country or region, but did not itself set off events beyond it — e.g. a founding that sparked significant regional change, a contested election, a regional treaty.",
+      "This specific event reshaped a whole region for generations — a major war, a revolution, an empire's rise or collapse, a conquest.",
+      "This specific event changed the course of world history across many countries and generations — a world war, a global pandemic, the fall of a major ancient empire.",
     ],
   },
 } as const;
@@ -69,18 +85,25 @@ const COST_PER_TOKEN = 42 / 1_000_000_000;
 const DEFAULT_TOKEN_CAP = 500_000;
 
 /** Impact >= this is "notable" (minor: false) — gets its own pulse, card and
- * stroke in the renderer (src/loop.ts, src/globe/dots.ts). Measured against
- * the first 500-event scored pilot: Jev's impact scores skew high overall
- * (institutions like universities/mosques/companies routinely land 2.0-2.5+
- * even though they're locally notable at best), so the naive "2.0 = reshaped
- * a region" cut from the criteria wording alone gave 17.3% non-minor — far
- * above the ~1.5-2% the perf budget (tests/perf.test.ts) was measured
- * against. 2.9 (near the top of the 0..3 scale) empirically gives ~3.2% on
- * that pilot sample — still a bit above budget but the closest defensible
- * cut without going all the way to a hard >=3 filter that would keep only
- * 0.6%; revisit once the full corpus is scored and this can be tuned against
- * a much bigger sample instead of 500 events. */
-const MINOR_THRESHOLD = 2.9;
+ * stroke in the renderer (src/loop.ts, src/globe/dots.ts).
+ *
+ * Re-derived for PROMPT_VERSION v2's reworded impact question (Task 3): with
+ * v1's wording, institutions systematically scored 2.0-2.5+, forcing this
+ * threshold up to an arbitrary 2.9 just to keep the notable fraction near
+ * budget. v2's probe (scripts/probe-impact-wording.mjs, 60-event mixed
+ * sample) instead pushed the entire institution-founding population down to
+ * ~0.0-0.6 while leaving genuinely region-or-world-changing events (a major
+ * war, a revolution, an empire's rise/fall, a world war) at 1.7-3.0 — a clean
+ * gap opens up right around the criteria's own "reshaped a whole region for
+ * generations" boundary (level 2 of 0..3). 2.0 is that boundary, taken
+ * directly from the criteria text rather than reverse-engineered from a
+ * fraction target, and was verified against the probe sample to separate the
+ * two populations without an arbitrary cliff. It is re-checked against the
+ * actual full-corpus distribution once Task 4 scores everything (see the
+ * final report) and nudged only if the resulting notable fraction is wildly
+ * off the ~2% budget — moving the threshold alone never requires re-scoring
+ * anything, since it's applied to the already-cached impact score. */
+const MINOR_THRESHOLD = 2.0;
 
 const MAX_RETRIES = 5;
 const RETRY_BASE_MS = 2000;

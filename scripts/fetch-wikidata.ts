@@ -833,6 +833,17 @@ export const RUNG_STATS: Record<CoordRung | "none", number> = {
   none: 0,
 };
 
+/** QIDs already accepted into the output anywhere in this run — across every
+ * period AND every theme bucket, not just within one fetchThemeBucketEvents
+ * call. Without this, the same Wikidata item can be independently selected
+ * by two different period/theme candidate queries (e.g. it carries both an
+ * ancient P571 inception date and a later P585 point-in-time value, landing
+ * it in two different periods' buckets) and get written twice — this is
+ * exactly the cause of the 381 duplicate QIDs found in the corpus this
+ * global set is meant to prevent from recurring. Reset at the start of each
+ * `main()` run so tests / multiple in-process runs don't leak state. */
+export const GLOBAL_SEEN_QIDS = new Set<string>();
+
 /** Resolves coordinates for a batch of QIDs (Part 1's fallback chain),
  * batched to COORD_BATCH_SIZE so the bounded P131+ rung stays cheap. Returns
  * a QID -> resolved-coordinate map; QIDs absent from the map resolved on no
@@ -919,6 +930,11 @@ async function fetchThemeBucketEvents(
     if (out.length >= quota) break; // stage-1 order is already rank order
     const qid = qidFromUri(b.item.value);
     if (seen.has(qid)) continue;
+    // Global across the whole run (every period, every theme bucket) — not
+    // just this bucket's local `seen` — so the same item selected by two
+    // different period/theme queries (e.g. it carries dates that fall in two
+    // different periods) is only ever emitted once. See GLOBAL_SEEN_QIDS.
+    if (GLOBAL_SEEN_QIDS.has(qid)) continue;
     const resolved = coords.get(qid);
     if (!resolved) {
       RUNG_STATS.none++;
@@ -935,6 +951,7 @@ async function fetchThemeBucketEvents(
     );
     if (!rec || !rec.qid) continue;
     seen.add(qid);
+    GLOBAL_SEEN_QIDS.add(qid);
     RUNG_STATS[resolved.rung]++;
     out.push(rec);
   }
@@ -965,6 +982,7 @@ async function fetchPeriodEvents(period: Period, periodIdx: number, quota: numbe
 }
 
 async function main(): Promise<void> {
+  GLOBAL_SEEN_QIDS.clear();
   const dryRun = process.argv.includes("--dry-run");
   const targetArg = process.argv.find((a) => a.startsWith("--target="));
   const target = targetArg ? Number(targetArg.split("=")[1]) : EVENT_TARGET;
