@@ -15,7 +15,9 @@
   (function () {
     var ids = ["deep-violet", "spiral-core", "observatory-mono", "amber-dusk", "phosphor-tide", "magenta-vapor"];
     var saved = null;
-    try { saved = localStorage.getItem("jev-galaxy-default"); } catch (err) {}
+    // The theme picked during this visit wins over the saved default, so the
+    // choice carries between the globe and /ask without being made permanent.
+    try { saved = sessionStorage.getItem("jev-galaxy-session") || localStorage.getItem("jev-galaxy-default"); } catch (err) {}
     document.documentElement.dataset.galaxy = saved && ids.indexOf(saved) > -1 ? saved : "spiral-core";
   })();
 </script>

@@ -42,6 +42,10 @@ import type { GalaxyId } from "./themes";
 
 const DATA_BASE = "/data";
 const GALAXY_STORAGE_KEY = "jev-galaxy-default";
+/** The theme picked during THIS visit. Separate from the saved default so a
+ * try-it-out pick carries across pages (/ask) without permanently changing
+ * what the site opens with. */
+const GALAXY_SESSION_KEY = "jev-galaxy-session";
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -102,6 +106,8 @@ async function boot(): Promise<void> {
 
   let savedDefaultId: GalaxyId | null = (() => {
     try {
+      // Only the persisted default — this drives the "default" tag in the
+      // menu, so a session pick must not masquerade as one.
       const v = localStorage.getItem(GALAXY_STORAGE_KEY);
       return isGalaxyId(v) ? v : null;
     } catch {
@@ -120,6 +126,17 @@ async function boot(): Promise<void> {
     applyGalaxyCssVars(theme);
     setGalaxyId(id, opts?.commit !== false);
     setAccent(theme.accent);
+    // A committed pick follows the visitor to /ask and back for the rest of
+    // the browsing session, without becoming their saved default — that
+    // stays an explicit "Set as default" choice. Hovering the menu to preview
+    // a theme (commit: false) deliberately doesn't write anything.
+    if (opts?.commit !== false) {
+      try {
+        sessionStorage.setItem(GALAXY_SESSION_KEY, id);
+      } catch {
+        /* private mode / blocked storage: the theme just won't follow */
+      }
+    }
     galaxyBackdrop.setTheme(theme, window.innerWidth, window.innerHeight);
     if (!opts || opts.commit !== false) renderThemeMenu();
   }
