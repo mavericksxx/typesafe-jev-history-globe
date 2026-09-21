@@ -6,6 +6,7 @@ import {
   GLOBAL_DAILY_TOKEN_CAP,
   PRECHARGE_ESTIMATE_TOKENS,
   REAL_THRESHOLD,
+  ACCURATE_THRESHOLD,
   validateText,
   mapJevAnswers,
   checkVisitorLimit,
@@ -27,7 +28,9 @@ function makeStore(): RateStore {
   };
 }
 
-function fullAnswers(overrides: Partial<{ real: number; impact: number; confidence: number }> = {}) {
+function fullAnswers(
+  overrides: Partial<{ real: number; accurate: number; impact: number; confidence: number }> = {}
+) {
   return {
     war: { noul: 0.9 },
     politics: { noul: 0.4 },
@@ -37,6 +40,7 @@ function fullAnswers(overrides: Partial<{ real: number; impact: number; confiden
     culture: { noul: 0.1 },
     impact: { score: overrides.impact ?? 3, confidence: overrides.confidence ?? 0.95 },
     real: { noul: overrides.real ?? 0.9 },
+    accurate: { noul: overrides.accurate ?? 0.9 },
   };
 }
 
@@ -86,6 +90,26 @@ describe("mapJevAnswers", () => {
 
   it("treats exactly the threshold as real (boundary is inclusive)", () => {
     const result = mapJevAnswers(fullAnswers({ real: REAL_THRESHOLD }));
+    expect(result.status).toBe("ok");
+  });
+
+  it("flags input below the accurate threshold as not_accurate, even when it passes real", () => {
+    const result = mapJevAnswers(fullAnswers({ accurate: ACCURATE_THRESHOLD - 0.01 }));
+    expect(result).toEqual({ status: "not_accurate" });
+  });
+
+  it("treats exactly the accurate threshold as accurate (boundary is inclusive)", () => {
+    const result = mapJevAnswers(fullAnswers({ accurate: ACCURATE_THRESHOLD }));
+    expect(result.status).toBe("ok");
+  });
+
+  it("checks not_historical before not_accurate: failing both reports not_historical", () => {
+    const result = mapJevAnswers(fullAnswers({ real: REAL_THRESHOLD - 0.01, accurate: ACCURATE_THRESHOLD - 0.01 }));
+    expect(result).toEqual({ status: "not_historical" });
+  });
+
+  it("requires both real and accurate to pass for status ok", () => {
+    const result = mapJevAnswers(fullAnswers());
     expect(result.status).toBe("ok");
   });
 });

@@ -19,6 +19,7 @@ export type LiveState =
   | { kind: "loading" }
   | { kind: "scored"; themes: Record<Theme, number>; impact: number; confidence: number }
   | { kind: "not_historical" }
+  | { kind: "not_accurate" }
   | { kind: "rate_limited" }
   | { kind: "resting" }
   | { kind: "error" };
@@ -48,6 +49,7 @@ export async function scoreLive(text: string, signal: AbortSignal): Promise<Live
   };
 
   if (data.status === "not_historical") return { kind: "not_historical" };
+  if (data.status === "not_accurate") return { kind: "not_accurate" };
   if (data.status === "ok" && data.themes && data.impact != null && data.confidence != null) {
     return { kind: "scored", themes: data.themes, impact: data.impact, confidence: data.confidence };
   }
@@ -69,6 +71,8 @@ export function liveStatusText(state: LiveState, latencyMs?: number): string {
     }
     case "not_historical":
       return "That doesn't look like a historical event.";
+    case "not_accurate":
+      return "That doesn't match the historical record.";
     case "rate_limited":
       return "Slow down a little — try again in a moment.";
     case "resting":

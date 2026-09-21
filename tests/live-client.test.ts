@@ -30,6 +30,10 @@ describe("liveStatusText", () => {
     expect(liveStatusText({ kind: "not_historical" })).toMatch(/doesn't look like a historical event/);
   });
 
+  it("has a distinct message for factually-inaccurate input", () => {
+    expect(liveStatusText({ kind: "not_accurate" })).toMatch(/doesn't match the historical record/);
+  });
+
   it("has a distinct message for per-visitor rate limiting", () => {
     expect(liveStatusText({ kind: "rate_limited" })).toMatch(/slow down/i);
   });

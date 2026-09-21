@@ -116,7 +116,40 @@ const QUESTIONS = {
       // threshold separates those. Asking instead whether it belongs in the
       // *historical record* splits them cleanly: real 0.74-0.99, junk
       // 0.01-0.04. Re-probe before changing this wording.
+      //
+      // This question only tests whether the input BELONGS to the domain of
+      // history (vs. anecdote/fiction/nonsense) — it does not test whether
+      // what it claims is actually true. A counterfactual like "Napoleon
+      // wins at Waterloo" belongs to the historical record just as much as
+      // the real outcome does, so it passes this question too. See
+      // "accurate" below for the second, factual-correctness check.
       "Is this a public historical event, place, or institution — something that belongs in the historical record rather than a personal anecdote, a private everyday occurrence, fiction, or nonsense?",
+  },
+  accurate: {
+    type: "noul",
+    instructions:
+      // Added to catch counterfactuals ("the Soviet Union lands the first
+      // human on the Moon", "Harold defeats William at Hastings") that the
+      // "real" question above lets through, because they belong to the
+      // historical record in form even though they're false in substance.
+      // Probed with scripts/probe-accurate-wording.mjs against the live API:
+      //   true-known (Apollo 11, Bastille, Hastings, 1929 crash): 0.83-0.95
+      //   true-obscure (Debdieba temple, Credit Suisse, Council of
+      //     Cesaracosta, Ragusa-Ottoman treaty): 0.18-0.61 — the regression
+      //     risk class; MUST clear the threshold, and does, with room below.
+      //   counterfactuals (6 cases: Soviet Moon landing, Harold beats
+      //     William, Napoleon wins Waterloo, colonies stay British, Siege of
+      //     Vorenhalt, Second Martian War): 0.01-0.04
+      //   junk (toast, grandmother, Gandalf, keyboard mash, spam): 0.05-0.49
+      //     — irrelevant here since junk is already rejected by "real"
+      //     above; both questions must pass.
+      //   ambiguous: "1067: Battle of Hastings" (wrong date) 0.60 (passes —
+      //     it's substantially the real event); "Romulus founds Rome in 753
+      //     BC" (legendary) 0.17 (passes, barely — documented, not designed
+      //     for).
+      // Gap sits between counterfactuals (max 0.04) and true-obscure records
+      // (min 0.18); see ACCURATE_THRESHOLD below.
+      "Did this actually happen as described, with the people, places, and outcome given being factually correct according to the historical record?",
   },
 } as const;
 
@@ -129,6 +162,7 @@ interface JevAnswers {
   culture: { noul: number };
   impact: { score: number; confidence: number };
   real: { noul: number };
+  accurate: { noul: number };
 }
 
 interface JevResponse {
@@ -146,12 +180,26 @@ interface JevResponse {
  * 0.3 sits in empty space rather than on top of either cluster. */
 export const REAL_THRESHOLD = 0.3;
 
+/** Below this, the input belongs to the historical record in form (it
+ * passed REAL_THRESHOLD) but doesn't match it in substance — a
+ * counterfactual — and the UI shows "that doesn't match the historical
+ * record", distinct from "that doesn't look like a historical event". */
+/** Measured with scripts/probe-accurate-wording.mjs: counterfactuals score
+ * 0.01-0.04, true-obscure records (the regression risk — corpus entries like
+ * "Debdieba, a temple, founded c. 3001 BC") score 0.18-0.61, true well-known
+ * events score 0.83-0.95. 0.1 sits in the gap between the counterfactual
+ * cluster and the true-obscure cluster, not adjacent to either. Re-probe
+ * before changing this wording or threshold. */
+export const ACCURATE_THRESHOLD = 0.1;
+
 export type ScoreResult =
   | { status: "ok"; themes: Record<Theme, number>; impact: number; confidence: number }
-  | { status: "not_historical" };
+  | { status: "not_historical" }
+  | { status: "not_accurate" };
 
 export function mapJevAnswers(answers: JevAnswers): ScoreResult {
   if (answers.real.noul < REAL_THRESHOLD) return { status: "not_historical" };
+  if (answers.accurate.noul < ACCURATE_THRESHOLD) return { status: "not_accurate" };
   const themes = Object.fromEntries(THEMES.map((t) => [t, answers[t].noul])) as Record<Theme, number>;
   return { status: "ok", themes, impact: answers.impact.score, confidence: answers.impact.confidence };
 }
@@ -187,17 +235,19 @@ export const GLOBAL_DAILY_TOKEN_CAP = Math.floor(GLOBAL_DAILY_SPEND_CAP_USD / CO
 
 /** scripts/score-events.ts's probe measured ~460-680 input tokens/call for
  * its 6 theme questions + impact. This Worker sends the same 7 questions
- * plus one more ("real"), so round the upper end up to 750 tok/call as the
- * pre-charge estimate used to decide whether to even start a call — the
- * same "never start a request that could blow the cap" pattern
+ * plus two more ("real" and "accurate"), so round the upper end (750,
+ * covering 7 questions) up ~15% for the extra "accurate" question — each
+ * added noul question costs roughly that much more per call — to 900
+ * tok/call as the pre-charge estimate used to decide whether to even start a
+ * call. Same "never start a request that could blow the cap" pattern
  * score-events.ts uses for its own token cap.
  *
  * At the two ends of that per-call range, the daily cap corresponds to:
- *   11,904,761 / 750 ≈ 15,873 calls/day (worst case, used for the gate)
- *   11,904,761 / 500 ≈ 23,809 calls/day (typical case)
+ *   11,904,761 / 900 ≈ 13,227 calls/day (worst case, used for the gate)
+ *   11,904,761 / 600 ≈ 19,841 calls/day (typical case)
  * Either way, comfortably above anything the per-visitor limits (300/day)
  * could produce short of tens of thousands of distinct daily visitors. */
-export const PRECHARGE_ESTIMATE_TOKENS = 750;
+export const PRECHARGE_ESTIMATE_TOKENS = 900;
 
 export interface RateStore {
   get(key: string): Promise<string | null>;
