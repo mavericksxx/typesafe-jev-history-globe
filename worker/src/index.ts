@@ -108,7 +108,15 @@ const QUESTIONS = {
   real: {
     type: "noul",
     instructions:
-      "Does this text describe an actual, specific historical event or occurrence — as opposed to being nonsensical, a fictional or hypothetical scenario, a general statement with no event, or not describing anything at all?",
+      // Wording matters more than the threshold here. An earlier version asked
+      // whether the text "really happened", which a personal anecdote passes
+      // easily — probed live: "i had toast for breakfast" scored 0.52 and "my
+      // grandmother moved house in 1987" 0.62, while a genuine but obscure
+      // record ("Debdieba, a temple, founded c. 3001 BC") scored only 0.25. No
+      // threshold separates those. Asking instead whether it belongs in the
+      // *historical record* splits them cleanly: real 0.74-0.99, junk
+      // 0.01-0.04. Re-probe before changing this wording.
+      "Is this a public historical event, place, or institution — something that belongs in the historical record rather than a personal anecdote, a private everyday occurrence, fiction, or nonsense?",
   },
 } as const;
 
@@ -134,7 +142,9 @@ interface JevResponse {
 /** Below this, the input is treated as not describing a real event and the
  * UI shows "that doesn't look like a historical event" instead of a
  * confidently-scored nonsense answer. */
-export const REAL_THRESHOLD = 0.4;
+/** Measured gap with the wording above is real 0.74-0.99 vs junk 0.01-0.04, so
+ * 0.3 sits in empty space rather than on top of either cluster. */
+export const REAL_THRESHOLD = 0.3;
 
 export type ScoreResult =
   | { status: "ok"; themes: Record<Theme, number>; impact: number; confidence: number }
@@ -209,6 +219,12 @@ function dayKeyPart(now: number): string {
  * the TTL for daily counters so a stale key can't linger indefinitely, but
  * also can't expire mid-day. */
 const DAY_TTL_SECONDS = 25 * 60 * 60;
+/** Cloudflare KV rejects any expirationTtl below 60 ("Expiration TTL must be
+ * at least 60"), which an in-memory fake store won't catch — it cost a live
+ * 1101 on first deploy. The per-second key already embeds the unix second, so
+ * a longer TTL only means the spent key lingers harmlessly after its second
+ * has passed; it never widens the 2-calls-per-second window itself. */
+const SECOND_TTL_SECONDS = 60;
 
 export type VisitorLimitResult =
   | { allowed: true }
@@ -223,7 +239,7 @@ export async function checkVisitorLimit(store: RateStore, ip: string, now: numbe
   const dayCount = Number((await store.get(dayKey)) ?? "0");
   if (dayCount >= PER_DAY_LIMIT) return { allowed: false, scope: "day" };
 
-  await store.put(secKey, String(secCount + 1), 2);
+  await store.put(secKey, String(secCount + 1), SECOND_TTL_SECONDS);
   await store.put(dayKey, String(dayCount + 1), DAY_TTL_SECONDS);
   return { allowed: true };
 }
