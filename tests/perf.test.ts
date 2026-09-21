@@ -24,6 +24,16 @@ const N = 50_000;
 // A cold, unoptimized single Node run of this measures ~10ms; a real,
 // JIT-warmed 60fps loop should do markedly better.
 const BUDGET_MS = 25;
+/** How many times to time the frame, keeping the FASTEST.
+ *
+ * A single sample measures how contended the machine was, not how fast the
+ * code is: the same unchanged code measured 11-14ms when run alone and
+ * 25-49ms inside a full `npm test`, failing five times in one day without a
+ * single real regression behind it. Taking the minimum removes that noise —
+ * a scheduler hiccup inflates some runs but never all of them, while a
+ * genuine O(n)-per-frame regression is slow in every run and still fails.
+ * Best-of-N is the usual way to benchmark on a noisy box. */
+const RUNS = 5;
 
 function toHistoryEvents(raw: RawEventRecord[]): HistoryEvent[] {
   const rng = mulberry32(42);
@@ -61,31 +71,42 @@ describe("per-frame globe update+draw-prep cost at pos=1 on 50k events", () => {
   const all = index.all();
   const pos = 1; // T(2026) — the densest point in the modern-skewed distribution
 
-  it("stays within budget for one frame's worth of prep work", () => {
+  it("stays within budget for one frame's worth of prep work (best of several runs)", () => {
     const projection = geoOrthographic().clipAngle(90).precision(0.4).translate([300, 300]).scale(300 * 0.34);
     const rot: [number, number] = [-10, -25];
     projection.rotate(rot);
     const center: [number, number] = [-rot[0], -rot[1]];
     const project = makeProjector(projection, center);
-    const grid = new DensityGrid();
 
-    const start = performance.now();
+    /** One frame's worth of work, timed. A fresh DensityGrid each run so
+     * every sample does the same build rather than an incremental update. */
+    function timeOneFrame() {
+      const grid = new DensityGrid();
+      const start = performance.now();
 
-    const lo = pos - ERA_WINDOW;
-    const [eraWindowStart, eraWindowEnd] = index.range(lo, pos);
-    const [eraStart, eraEnd] = boundToMostRecent(eraWindowStart, eraWindowEnd, 4000);
-    const snapshot = computeEraSnapshot(all, eraStart, eraEnd, pos, lo);
+      const lo = pos - ERA_WINDOW;
+      const [eraWindowStart, eraWindowEnd] = index.range(lo, pos);
+      const [eraStart, eraEnd] = boundToMostRecent(eraWindowStart, eraWindowEnd, 4000);
+      const snapshot = computeEraSnapshot(all, eraStart, eraEnd, pos, lo);
 
-    const [windowStart, windowEnd] = index.range(pos - DOT_FADE_WINDOW, pos);
-    const [dotStart, dotEnd] = boundDotWindow(windowStart, windowEnd);
-    const dots = prepareDots(all, dotStart, dotEnd, pos, project);
+      const [windowStart, windowEnd] = index.range(pos - DOT_FADE_WINDOW, pos);
+      const [dotStart, dotEnd] = boundDotWindow(windowStart, windowEnd);
+      const dots = prepareDots(all, dotStart, dotEnd, pos, project);
 
-    grid.syncTo(all, index.countUpTo(pos));
-    const cells = prepareDensityCells(grid, project, 6);
+      grid.syncTo(all, index.countUpTo(pos));
+      const cells = prepareDensityCells(grid, project, 6);
 
-    const focus = findFocusEvent(pos);
+      const focus = findFocusEvent(pos);
 
-    const elapsed = performance.now() - start;
+      const elapsed = performance.now() - start;
+      return { elapsed, windowStart, windowEnd, dotStart, dotEnd, dots, eraWindowStart, eraWindowEnd, eraStart, eraEnd, snapshot, cells, focus };
+    }
+
+    const samples = Array.from({ length: RUNS }, timeOneFrame);
+    const times = samples.map((s) => s.elapsed);
+    const elapsed = Math.min(...times);
+    const { windowStart, windowEnd, dotStart, dotEnd, dots, eraWindowStart, eraWindowEnd, eraStart, eraEnd, snapshot, cells, focus } =
+      samples[0]!;
 
     // Sanity: this frame is actually exercising the dense era, and the
     // dot window is in fact the thing MAX_VISIBLE_DOTS bounds (without the
@@ -102,7 +123,8 @@ describe("per-frame globe update+draw-prep cost at pos=1 on 50k events", () => {
 
     // eslint-disable-next-line no-console
     console.log(
-      `[perf] globe update+draw-prep @ pos=1, n=${N}: ${elapsed.toFixed(2)}ms ` +
+      `[perf] globe update+draw-prep @ pos=1, n=${N}: best ${elapsed.toFixed(2)}ms ` +
+        `of ${RUNS} [${times.map((t) => t.toFixed(1)).join(", ")}] ` +
         `(dot window ${dotEnd - dotStart}/${windowEnd - windowStart}, era n=${snapshot.n}, density cells=${cells.length})`
     );
 
