@@ -138,6 +138,11 @@ export class Loop {
   private lastGalaxyDraw = 0;
   private raf = 0;
   private lastRenderedHover: HistoryEvent | null = null;
+  /** The event currently shown on the live card. It's deliberately kept OUT
+   * of the judgments stream — otherwise the newest judgment renders twice,
+   * once live and once at the top of the stream. It's prepended to the
+   * stream when the next notable event takes over the live card. */
+  private liveHeld: HistoryEvent | null = null;
 
   constructor(deps: LoopDeps) {
     this.deps = deps;
@@ -163,18 +168,22 @@ export class Loop {
     if (n < state.idx || !emit) {
       setIdx(n);
       if (!emit) {
-        const recent = collectRecentCards(all, n, 3);
-        this.deps.stream.setRecent(recent);
+        // One more than the stream shows, since the newest of them goes to
+        // the live card instead of the stream.
+        const recent = collectRecentCards(all, n, 4);
+        const newest = recent.length ? recent[recent.length - 1]! : null;
+        this.deps.stream.setRecent(recent.slice(0, -1));
         for (const e of recent) this.warmText(e);
         // The live card always tracks "the most recent notable event at or
         // before pos", whether that's from a scrub, a jump, or first boot —
         // not just events crossed one at a time during playback.
-        this.deps.live.setTarget(recent.length ? recent[recent.length - 1]! : null);
+        this.liveHeld = newest;
+        this.deps.live.setTarget(newest);
       }
     } else {
       const start = state.idx;
       setIdx(n);
-      let lastEmitted: HistoryEvent | null = null;
+      const crossed: HistoryEvent[] = [];
       for (let i = start; i < n; i++) {
         const e = all[i]!;
         // Only notable events get a pulse/card — a minor filler event
@@ -182,15 +191,21 @@ export class Loop {
         // the dense modern era.
         if (!e.minor) {
           pushPulse(e, performance.now());
-          this.deps.stream.add(e);
           this.warmText(e);
-          lastEmitted = e;
+          crossed.push(e);
         }
       }
       // Only retarget the live card if a new notable event actually crossed
       // this frame — otherwise it keeps easing toward whatever it already
-      // had, exactly as a live instrument should between readings.
-      if (lastEmitted) this.deps.live.setTarget(lastEmitted);
+      // had, exactly as a live instrument should between readings. The one
+      // taking over the live card is withheld from the stream; the one it
+      // displaces (plus anything else crossed this frame) goes in.
+      if (crossed.length) {
+        if (this.liveHeld) this.deps.stream.add(this.liveHeld);
+        for (let i = 0; i < crossed.length - 1; i++) this.deps.stream.add(crossed[i]!);
+        this.liveHeld = crossed[crossed.length - 1]!;
+        this.deps.live.setTarget(this.liveHeld);
+      }
     }
     setCalls(Math.max(getState().calls, n));
   }
