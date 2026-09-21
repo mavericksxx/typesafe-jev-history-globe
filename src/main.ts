@@ -382,10 +382,18 @@ async function boot(): Promise<void> {
   function isInsideJudgmentsScroll(target: EventTarget | null): boolean {
     return target instanceof Element && target.closest(".stream") !== null;
   }
+  // Below the two-column breakpoint the reel never drives scroll (see
+  // narrative/reelScroll.ts's own (min-width: 861px) gate), so there is no
+  // conflict for a user scroll to resolve. Pausing there just punished anyone
+  // on a phone for scrolling down to watch the judgments while it played.
+  const reelCanDriveScroll =
+    typeof window.matchMedia === "function" ? window.matchMedia("(min-width: 861px)") : null;
+
   function onUserScrollIntent(e: Event): void {
     // The judgments list has its own, unrelated scroll container — scrolling
     // it must not count as "the user is trying to scroll the page".
     if (isInsideJudgmentsScroll(e.target)) return;
+    if (reelCanDriveScroll && !reelCanDriveScroll.matches) return;
     if (getState().playing) {
       setPlaying(false);
       setPlayLabel();
