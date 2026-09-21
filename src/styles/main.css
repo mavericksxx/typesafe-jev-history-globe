@@ -366,3 +366,27 @@ h1::before { content: ""; display: inline-block; width: 7px; height: 7px; margin
 .bars.compact .track { height: 6px; }
 
 .note { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); margin-top: 10px; }
+
+/* live: "try it live" instrument panel — same .label/.card/.q/.tag/.bars
+   surfaces as the era snapshot, so it reads as one system rather than the
+   pre-instrument-panel .live block this replaces. */
+.live-panel #liveLatency { font-variant-numeric: tabular-nums; }
+.live-panel .card { display: flex; flex-direction: column; gap: 10px; }
+.live-label { font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
+.live-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: 1rem;
+  padding: 10px 12px;
+  border: 1px solid var(--b-border);
+  border-radius: 0;
+  clip-path: var(--notch);
+  background: var(--b-fill);
+  color: var(--ink);
+}
+.live-input:focus-visible { outline: 2px solid var(--ox); outline-offset: 2px; }
+.live-panel .q { margin-bottom: 2px; }
+.live-panel .bars { min-height: 0; }
+.live-panel .conf { margin-top: 0; }
+.live-panel .conf.is-error { color: var(--ox); }

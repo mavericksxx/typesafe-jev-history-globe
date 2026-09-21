@@ -106,6 +106,18 @@
       </section>
     </div>
   </div>
+
+  <section class="live-panel">
+    <div class="label"><span>Try it live</span><span id="liveLatency"></span></div>
+    <div class="card">
+      <label class="live-label" for="liveInput">Describe a historical event and see how Jev reads it</label>
+      <input id="liveInput" class="live-input" type="text" autocomplete="off" maxlength="300"
+             placeholder="e.g. 1969: Apollo 11 lands on the Moon" />
+      <div class="q"><span class="tag">THEMES</span><span>What is this event about?</span></div>
+      <div class="bars" id="liveBars"></div>
+      <div class="conf" id="liveStatus" role="status" aria-live="polite">Type an event above.</div>
+    </div>
+  </section>
 </div>
 
 <script type="module" src="/src/main.ts"></script>
