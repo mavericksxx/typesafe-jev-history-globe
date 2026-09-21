@@ -28,6 +28,7 @@ import { CometRail } from "./narrative/comet";
 import { ReelScroll } from "./narrative/reelScroll";
 import { EraPanel } from "./panel/era";
 import { EventStream } from "./panel/stream";
+import { LiveCard } from "./panel/live";
 import { getGalaxyTheme } from "./themes";
 
 const REEL_SECONDS = 150;
@@ -65,6 +66,7 @@ export interface LoopDeps {
   reelScroll: ReelScroll;
   eraPanel: EraPanel;
   stream: EventStream;
+  live: LiveCard;
   els: LoopEls;
   ensureText: (e: HistoryEvent) => Promise<string>;
   /** Called when playback reaches the end on its own (not via a manual pause). */
@@ -164,10 +166,15 @@ export class Loop {
         const recent = collectRecentCards(all, n, 3);
         this.deps.stream.setRecent(recent);
         for (const e of recent) this.warmText(e);
+        // The live card always tracks "the most recent notable event at or
+        // before pos", whether that's from a scrub, a jump, or first boot —
+        // not just events crossed one at a time during playback.
+        this.deps.live.setTarget(recent.length ? recent[recent.length - 1]! : null);
       }
     } else {
       const start = state.idx;
       setIdx(n);
+      let lastEmitted: HistoryEvent | null = null;
       for (let i = start; i < n; i++) {
         const e = all[i]!;
         // Only notable events get a pulse/card — a minor filler event
@@ -177,8 +184,13 @@ export class Loop {
           pushPulse(e, performance.now());
           this.deps.stream.add(e);
           this.warmText(e);
+          lastEmitted = e;
         }
       }
+      // Only retarget the live card if a new notable event actually crossed
+      // this frame — otherwise it keeps easing toward whatever it already
+      // had, exactly as a live instrument should between readings.
+      if (lastEmitted) this.deps.live.setTarget(lastEmitted);
     }
     setCalls(Math.max(getState().calls, n));
   }
@@ -187,7 +199,10 @@ export class Loop {
     if (e.text) return;
     this.deps.ensureText(e).then(
       (text) => {
-        if (text) this.deps.stream.updateText(e.idx, text);
+        if (text) {
+          this.deps.stream.updateText(e.idx, text);
+          this.deps.live.updateText(e.idx, text);
+        }
       },
       () => {
         /* a failed shard fetch just means this card keeps its placeholder text */
@@ -343,6 +358,7 @@ export class Loop {
       playing: state.playing,
       now,
     });
+    this.deps.live.step(dt, state.reducedMotion);
 
     this.updateFocusRotation(state.pos, now);
     prunePulses(now, PULSE_LIFETIME_MS);

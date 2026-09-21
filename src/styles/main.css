@@ -312,6 +312,11 @@ h1::before { content: ""; display: inline-block; width: 7px; height: 7px; margin
 .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--c, var(--ox)); opacity: 0.4; transition: width 0.55s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s; }
 .bar.win .fill { opacity: 1; }
 .era .fill { transition: none; }
+/* The live card eases its bars itself, per frame (see src/panel/live.ts) —
+   a CSS width transition running at the same time would fight that ease
+   whenever a new event retargets it before the previous transition finished. */
+.live-card .fill { transition: none; }
+.live-block { flex: none; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .conf { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); margin-top: 8px; display: flex; justify-content: space-between; }
 .impact { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 10px; }

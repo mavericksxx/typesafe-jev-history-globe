@@ -25,6 +25,7 @@ import { Timeline, TL_COLS } from "./timeline";
 import { GalaxyBackdrop } from "./galaxy/backdrop";
 import { EraPanel } from "./panel/era";
 import { EventStream } from "./panel/stream";
+import { LiveCard } from "./panel/live";
 import { renderNarrative, observeNarrative } from "./narrative";
 import { CometRail } from "./narrative/comet";
 import { ReelScroll } from "./narrative/reelScroll";
@@ -258,6 +259,7 @@ async function boot(): Promise<void> {
   });
 
   const stream = new EventStream(byId("stream"));
+  const liveCard = new LiveCard(byId("liveCard"));
 
   const playBtn = byId("play") as HTMLButtonElement;
   function setPlayLabel(): void {
@@ -275,6 +277,7 @@ async function boot(): Promise<void> {
     reelScroll,
     eraPanel,
     stream,
+    live: liveCard,
     els: {
       hover: byId("hover"),
       sEvents: byId("sEvents"),
