@@ -91,6 +91,11 @@
    sideways by the scrollbar's width partway through loading. */
 html { scrollbar-gutter: stable; }
 html, body { background: var(--void); color: var(--ink); margin: 0; }
+/* Stop the page rubber-banding past its top edge. On iOS Safari that gesture
+   exposes a band above the fixed .galaxy-bg canvas (reading as a black flash)
+   and, pulled far enough, triggers pull-to-refresh — scrolling up to re-read
+   the era column was reloading the whole app mid-playback. */
+html, body { overscroll-behavior-y: contain; }
 body {
   font-family: var(--serif);
   padding-inline: var(--page-pad);
