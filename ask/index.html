@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ask Jev — Epochs</title>
+<meta name="description" content="Describe a historical event and see how Jev scores it, pinned in place and time on the globe." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<script>
+  // Same pre-paint theme pick as index.html — keeps /ask visually
+  // consistent with whatever galaxy the visitor last chose there, with no
+  // flash of the default theme before src/ask.ts attaches.
+  (function () {
+    var ids = ["deep-violet", "spiral-core", "observatory-mono", "amber-dusk", "phosphor-tide", "magenta-vapor"];
+    var saved = null;
+    try { saved = localStorage.getItem("jev-galaxy-default"); } catch (err) {}
+    document.documentElement.dataset.galaxy = saved && ids.indexOf(saved) > -1 ? saved : "spiral-core";
+  })();
+</script>
+</head>
+<body>
+<canvas class="galaxy-bg" id="galaxyBg" aria-hidden="true"></canvas>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="ask-btn" href="/">
+      <span>&larr; Back to the globe</span>
+    </a>
+    <span class="topbar-name">Ask Jev</span>
+  </div>
+</div>
+
+<div class="wrap ask-wrap">
+  <header>
+    <div class="hero-plate">
+      <h1>Ask Jev</h1>
+      <p class="dek">Describe a historical event. Jev scores it and pins it in place and time.</p>
+    </div>
+  </header>
+
+  <div class="ask-layout">
+    <section class="ask-form">
+      <div class="card">
+        <label class="live-label" for="askInput">Describe a historical event</label>
+        <input id="askInput" class="live-input" type="text" autocomplete="off" maxlength="300" autofocus
+               placeholder="e.g. 1969: Apollo 11 lands on the Moon" />
+        <div class="q"><span class="tag">THEMES</span><span>What is this event about?</span></div>
+        <div class="bars" id="askBars"></div>
+        <div class="conf" id="askStatus" role="status" aria-live="polite">Type an event above.</div>
+        <div class="ask-loc" id="askLoc" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="ask-globe-col">
+      <div class="globe-box" id="askGlobeBox">
+        <canvas id="askGlobe" role="img" aria-label="Globe showing the described event pinned in place and time, alongside nearby historical events"></canvas>
+      </div>
+      <p class="note" id="askGlobeNote">Score an event to pin it on the globe.</p>
+    </section>
+  </div>
+</div>
+
+<script type="module" src="/src/ask.ts"></script>
+</body>
+</html>

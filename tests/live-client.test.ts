@@ -13,17 +13,41 @@ describe("liveStatusText", () => {
 
   it("reports impact, label and latency once scored", () => {
     const text = liveStatusText(
-      { kind: "scored", themes: zeroThemes(), impact: 2.7, confidence: 0.8 },
+      {
+        kind: "scored",
+        themes: zeroThemes(),
+        impact: 2.7,
+        confidence: 0.8,
+        location: { kind: "country", country: "France", lat: 46, lon: 2 },
+      },
       412
     );
     expect(text).toContain("2.70 / 3");
     expect(text).toContain("world");
     expect(text).toContain("412 ms");
+    expect(text).toContain("France");
   });
 
   it("omits latency when not given", () => {
-    const text = liveStatusText({ kind: "scored", themes: zeroThemes(), impact: 0, confidence: 0.5 });
+    const text = liveStatusText({
+      kind: "scored",
+      themes: zeroThemes(),
+      impact: 0,
+      confidence: 0.5,
+      location: { kind: "none" },
+    });
     expect(text).not.toContain("ms");
+  });
+
+  it("says location is unknown rather than pinning nothing", () => {
+    const text = liveStatusText({
+      kind: "scored",
+      themes: zeroThemes(),
+      impact: 1,
+      confidence: 0.9,
+      location: { kind: "none" },
+    });
+    expect(text).toMatch(/location unknown/i);
   });
 
   it("has a distinct message for not-a-historical-event", () => {

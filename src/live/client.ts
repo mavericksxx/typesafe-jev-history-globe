@@ -4,6 +4,12 @@
 // this replaces for real.
 import { IMPACT_LABELS, THEMES } from "../data/types";
 import type { Theme } from "../data/types";
+import { parseYear } from "./parseYear";
+
+/** Mirrors worker/src/index.ts's `Location`. "none" means Jev couldn't
+ * place the event confidently — the UI must say so, never invent a pin
+ * (see worker/src/index.ts's UNKNOWN_COUNTRY_THRESHOLD comment). */
+export type LiveLocation = { kind: "country"; country: string; lat: number; lon: number } | { kind: "none" };
 
 /** Build-time config (Vite `import.meta.env`), not a secret — just where
  * the Worker lives. Falls back to `undefined`, in which case the panel
@@ -17,7 +23,7 @@ const WORKER_URL = import.meta.env.VITE_JEV_WORKER_URL as string | undefined;
 export type LiveState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "scored"; themes: Record<Theme, number>; impact: number; confidence: number }
+  | { kind: "scored"; themes: Record<Theme, number>; impact: number; confidence: number; location: LiveLocation; year?: number }
   | { kind: "not_historical" }
   | { kind: "not_accurate" }
   | { kind: "rate_limited" }
@@ -30,10 +36,16 @@ export type LiveState =
 export async function scoreLive(text: string, signal: AbortSignal): Promise<LiveState> {
   if (!WORKER_URL) return { kind: "error" };
 
+  // Parse a year out of the text ourselves first — free, and more reliable
+  // than asking the model for the common "1969: ..." case. Only when this
+  // fails does the Worker ask the model instead (see worker/src/index.ts's
+  // YEAR_QUESTION).
+  const year = parseYear(text);
+
   const res = await fetch(WORKER_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, year }),
     signal,
   });
 
@@ -46,12 +58,21 @@ export async function scoreLive(text: string, signal: AbortSignal): Promise<Live
     themes?: Record<Theme, number>;
     impact?: number;
     confidence?: number;
+    location?: LiveLocation;
+    year?: number;
   };
 
   if (data.status === "not_historical") return { kind: "not_historical" };
   if (data.status === "not_accurate") return { kind: "not_accurate" };
   if (data.status === "ok" && data.themes && data.impact != null && data.confidence != null) {
-    return { kind: "scored", themes: data.themes, impact: data.impact, confidence: data.confidence };
+    return {
+      kind: "scored",
+      themes: data.themes,
+      impact: data.impact,
+      confidence: data.confidence,
+      location: data.location ?? { kind: "none" },
+      year: data.year,
+    };
   }
   return { kind: "error" };
 }
@@ -67,7 +88,8 @@ export function liveStatusText(state: LiveState, latencyMs?: number): string {
     case "scored": {
       const label = IMPACT_LABELS[Math.min(IMPACT_LABELS.length - 1, Math.max(0, Math.round(state.impact)))];
       const latency = latencyMs != null ? ` · ${latencyMs} ms` : "";
-      return `impact ${state.impact.toFixed(2)} / 3 · ${label}${latency}`;
+      const loc = state.location.kind === "country" ? ` · associated with ${state.location.country}` : " · location unknown, not pinned";
+      return `impact ${state.impact.toFixed(2)} / 3 · ${label}${loc}${latency}`;
     }
     case "not_historical":
       return "That doesn't look like a historical event.";

@@ -7,8 +7,10 @@ import {
   PRECHARGE_ESTIMATE_TOKENS,
   REAL_THRESHOLD,
   ACCURATE_THRESHOLD,
+  UNKNOWN_COUNTRY_THRESHOLD,
   validateText,
   mapJevAnswers,
+  yearFromScore,
   checkVisitorLimit,
   hasGlobalBudget,
   recordSpend,
@@ -111,6 +113,53 @@ describe("mapJevAnswers", () => {
   it("requires both real and accurate to pass for status ok", () => {
     const result = mapJevAnswers(fullAnswers());
     expect(result.status).toBe("ok");
+  });
+
+  it("resolves a confident country answer to its centroid", () => {
+    const answers = { ...fullAnswers(), country: { probabilities: { France: 0.98, Germany: 0.02 } } };
+    const result = mapJevAnswers(answers);
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.location).toEqual({ kind: "country", country: "France", lat: expect.any(Number), lon: expect.any(Number) });
+    }
+  });
+
+  it("reports location 'none' below UNKNOWN_COUNTRY_THRESHOLD rather than guessing", () => {
+    const answers = {
+      ...fullAnswers(),
+      country: { probabilities: { France: UNKNOWN_COUNTRY_THRESHOLD - 0.01, Germany: UNKNOWN_COUNTRY_THRESHOLD - 0.02 } },
+    };
+    const result = mapJevAnswers(answers);
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") expect(result.location).toEqual({ kind: "none" });
+  });
+
+  it("prefers the client-parsed year over asking the model", () => {
+    const answers = { ...fullAnswers(), year: { score: 7 } };
+    const result = mapJevAnswers(answers, 1969);
+    if (result.status === "ok") expect(result.year).toBe(1969);
+  });
+
+  it("falls back to the model's year answer when no year was parsed client-side", () => {
+    const answers = { ...fullAnswers(), year: { score: 0 } };
+    const result = mapJevAnswers(answers);
+    if (result.status === "ok") expect(result.year).toBe(-3000);
+  });
+});
+
+describe("yearFromScore", () => {
+  it("maps the low end to the start of history and the top score to the last bucket's start", () => {
+    // 8 criteria (indices 0..7) means score 7 is the START of the last
+    // bucket ("1900 to present"), not its end — the score itself never
+    // reaches 8, same as how the existing "impact" score (4 criteria)
+    // tops out at 3, not a value representing "past the last criterion".
+    expect(yearFromScore(0)).toBe(-3000);
+    expect(yearFromScore(7)).toBe(1900);
+  });
+
+  it("interpolates within a bucket", () => {
+    // bucket index 2 is "1 AD to 500 AD" (edges 0 -> 500); 2.5 is its midpoint
+    expect(yearFromScore(2.5)).toBe(250);
   });
 });
 

@@ -113,6 +113,11 @@ body {
 .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; margin-inline: calc(-1 * var(--page-pad)); background: var(--void); border-bottom: 1px solid var(--rule); box-sizing: border-box; }
 .topbar-inner { max-width: 1280px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 52px; padding-inline: var(--page-pad); box-sizing: border-box; }
 .topbar-name { font-family: var(--serif); font-size: 1.05rem; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
+.ask-btn { font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-2); background: var(--b-fill); border: 1px solid var(--ox); border-radius: 0; clip-path: var(--notch); padding: 7px 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; text-decoration: none; flex: none; }
+.ask-btn:hover { color: var(--ink); }
+.ask-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ox); flex: none; animation: ask-pulse 1.8s ease-in-out infinite; }
+@keyframes ask-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }
+@media (prefers-reduced-motion: reduce) { .ask-dot { animation: none; } }
 .theme-switch { position: relative; flex: none; }
 .theme-btn { font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-2); background: var(--b-fill); border: 1px solid var(--ox); border-radius: 0; clip-path: var(--notch); padding: 7px 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .theme-btn:hover { color: var(--ink); }
@@ -386,6 +391,20 @@ h1::before { content: ""; display: inline-block; width: 7px; height: 7px; margin
   color: var(--ink);
 }
 .live-input:focus-visible { outline: 2px solid var(--ox); outline-offset: 2px; }
+
+/* /ask page: input+scores on the left, a pinned globe on the right.
+   Reuses .card/.label/.q/.tag/.bars/.live-input/.conf/.note wholesale — the
+   same instrument-panel language as the main page, not a second system. */
+.ask-wrap { padding-bottom: 40px; }
+.ask-form .card { display: flex; flex-direction: column; gap: 10px; }
+.ask-loc { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); margin-top: 2px; }
+.ask-loc.is-error { color: var(--ox); }
+.ask-layout { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr); }
+.ask-globe-col .globe-box { max-width: 420px; margin-inline: auto; }
+@media (min-width: 861px) {
+  .ask-layout { grid-template-columns: minmax(0, 420px) minmax(0, 1fr); align-items: start; }
+  .ask-globe-col .globe-box { max-width: 100%; }
+}
 .live-panel .q { margin-bottom: 2px; }
 .live-panel .bars { min-height: 0; }
 .live-panel .conf { margin-top: 0; }

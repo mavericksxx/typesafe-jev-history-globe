@@ -25,14 +25,9 @@ import { Timeline, TL_COLS } from "./timeline";
 import { GalaxyBackdrop } from "./galaxy/backdrop";
 import { EraPanel } from "./panel/era";
 import { EventStream } from "./panel/stream";
-import { makeBars, setBars } from "./panel/bars";
 import { renderNarrative, observeNarrative } from "./narrative";
 import { CometRail } from "./narrative/comet";
 import { ReelScroll } from "./narrative/reelScroll";
-import { scoreLive, liveStatusText, zeroThemes } from "./live/client";
-import type { LiveState } from "./live/client";
-import { THEMES } from "./data/types";
-import { THEME_COLORS } from "./themes";
 import { Loop } from "./loop";
 import {
   GALAXY_IDS,
@@ -425,53 +420,6 @@ async function boot(): Promise<void> {
     setHoverEvent(pickNearest(all, dotStart, dotEnd, globe.projectionRef, mx, my));
   });
   globeCanvas.addEventListener("pointerleave", () => setHoverEvent(null));
-
-  // ---------- live (real Jev call, via the Cloudflare Worker proxy) ------
-  const liveInput = byId("liveInput") as HTMLInputElement;
-  const liveStatus = byId("liveStatus");
-  const liveLatency = byId("liveLatency");
-  const liveRows = makeBars(byId("liveBars"), THEMES, THEME_COLORS);
-  setBars(liveRows, zeroThemes());
-
-  let liveDebounce: ReturnType<typeof setTimeout> | undefined;
-  let liveAbort: AbortController | undefined;
-  let liveRequestId = 0;
-
-  function renderLiveState(state: LiveState, latencyMs?: number): void {
-    liveStatus.textContent = liveStatusText(state, latencyMs);
-    liveStatus.classList.toggle("is-error", state.kind === "error" || state.kind === "rate_limited" || state.kind === "resting");
-    if (state.kind === "scored") setBars(liveRows, state.themes);
-    liveLatency.textContent = state.kind === "scored" && latencyMs != null ? `${latencyMs} ms` : "";
-  }
-
-  async function runLiveJudge(text: string): Promise<void> {
-    liveAbort?.abort();
-    if (!text.trim()) {
-      renderLiveState({ kind: "idle" });
-      setBars(liveRows, zeroThemes());
-      return;
-    }
-    const requestId = ++liveRequestId;
-    const controller = new AbortController();
-    liveAbort = controller;
-    renderLiveState({ kind: "loading" });
-    const t0 = performance.now();
-    try {
-      const state = await scoreLive(text, controller.signal);
-      if (requestId !== liveRequestId) return; // superseded by a later keystroke
-      renderLiveState(state, Math.round(performance.now() - t0));
-    } catch (err) {
-      if ((err as Error).name === "AbortError") return; // superseded, not an error
-      if (requestId !== liveRequestId) return;
-      renderLiveState({ kind: "error" });
-    }
-  }
-
-  liveInput.addEventListener("input", () => {
-    clearTimeout(liveDebounce);
-    const text = liveInput.value;
-    liveDebounce = setTimeout(() => void runLiveJudge(text), 300);
-  });
 
   // ---------- boot at a resting state that already shows content ----------
   setPos(T(1520));

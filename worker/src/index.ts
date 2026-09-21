@@ -19,6 +19,16 @@
 const THEMES = ["war", "politics", "religion", "economy", "science", "culture"] as const;
 type Theme = (typeof THEMES)[number];
 
+// Unlike THEMES above, the country centroid table IS imported rather than
+// duplicated: it's 176 generated entries (scripts/gen-country-centroids.ts),
+// and hand-keeping a copy of that in sync would just reintroduce the mistake
+// the generator exists to avoid. wrangler bundles this JSON in at build
+// time, same as any other import — it doesn't create a live runtime
+// dependency on the app, just a source-tree one at build time.
+import { COUNTRY_CENTROIDS } from "../../src/live/countryCentroids";
+
+const COUNTRIES = Object.keys(COUNTRY_CENTROIDS);
+
 // ---- KV shape (ambient, so we don't need @cloudflare/workers-types) -----
 
 interface KVNamespace {
@@ -153,6 +163,85 @@ const QUESTIONS = {
   },
 } as const;
 
+// ---- Location + year (for pinning the event on the /ask globe) ----------
+//
+// Wording matters here the same way it did for "real"/"accurate" above.
+// Probed with scripts/probe-country-question.mjs, two phrasings:
+//   "physical" ("where did this physically take place?") sends
+//     "1969: Apollo 11 lands on the Moon" to the USA at only 0.88-0.85
+//     confidence (the model hedges between the US and "nowhere"), and a
+//     bare "Apollo 11 lands on the Moon" the same.
+//   "associated" ("which country is this event most associated with —
+//     the state/institution/people responsible") sends BOTH Apollo 11
+//     phrasings to the USA at 1.00. That's the wording shipped below.
+// This is a deliberate product trade-off, not a side effect: it means a
+// live pin means "whose event this was", not "where it physically
+// happened", which is NOT how the 15,356 corpus events are pinned (they're
+// geocoded to physical location). Dropping the single most iconic event
+// anyone will type ("Apollo 11") because the Moon isn't a country would be
+// a worse outcome than that one inconsistency, so this is the accepted
+// trade. The /ask UI must label the pin as "associated with <country>",
+// not imply a precise physical site.
+//
+// The same probe also showed the model will confidently (0.96-0.99) commit
+// a genuinely multi-country event (World War II -> Germany, the Silk Road
+// -> China) to a SINGLE country rather than reporting low confidence — so
+// UNKNOWN_COUNTRY_THRESHOLD below only catches cases where the model itself
+// is unsure, not "this event spans many countries but the model picked
+// one anyway". That's a known gap, left as-is: the alternative (asking a
+// second question just to detect multi-country spread) doubles the cost
+// of every request for a case that's rare among typed-in single events.
+const COUNTRY_QUESTION = {
+  type: "choice",
+  instructions:
+    "Which present-day country is this event most associated with — the country of the state, institution, or people responsible for it — even if the event itself took place somewhere with no country (such as in space, at sea, or in Antarctica)?",
+  criteria: Object.fromEntries(COUNTRIES.map((c) => [c, null])),
+} as const;
+
+/** Probed minimum observed confidence for a country the model DID commit to
+ * was 0.69 (an anachronistic ancient site, "Debdieba... c. 3001 BC" ->
+ * Egypt); every clearly-resolvable case in the probe cleared 0.8. 0.35 sits
+ * well under that whole observed cluster, so in practice this only fires
+ * when the model returns something close to a coin flip, not merely
+ * "somewhat uncertain" — see the probe's multi-country note above for why a
+ * tighter threshold wouldn't catch that failure mode anyway. */
+export const UNKNOWN_COUNTRY_THRESHOLD = 0.35;
+
+// A "score" question (like impact above) instead of another wide "choice"
+// question — asking the model to place a plain multiple-choice question
+// over 176 countries already costs ~1650 input tokens/call (probed); a
+// second choice question over year-buckets would roughly double that
+// again for comparatively little payoff, since most typed events already
+// carry a parseable year and never reach this question at all (see
+// src/live/parseYear.ts — the client parses first, and this question is
+// only included when that fails). NOT separately live-probed for accuracy
+// (unlike everything else in this file) — flagged here rather than
+// silently shipped as if it had been.
+const YEAR_EDGES = [-3000, -1000, 0, 500, 1000, 1500, 1750, 1900, 2026];
+const YEAR_QUESTION = {
+  type: "score",
+  instructions: "When did this event take place? Pick the era it belongs to.",
+  criteria: [
+    "Before 1000 BC",
+    "1000 BC to 1 BC",
+    "1 AD to 500 AD",
+    "500 to 1000 AD",
+    "1000 to 1500 AD",
+    "1500 to 1750 AD",
+    "1750 to 1900 AD",
+    "1900 to present",
+  ],
+} as const;
+
+/** Maps a YEAR_QUESTION score (0..criteria.length-1, fractional) to a
+ * representative year by linearly interpolating between YEAR_EDGES. */
+export function yearFromScore(score: number): number {
+  const s = Math.max(0, Math.min(YEAR_EDGES.length - 2, score));
+  const i = Math.min(YEAR_EDGES.length - 2, Math.floor(s));
+  const frac = s - i;
+  return Math.round(YEAR_EDGES[i]! + frac * (YEAR_EDGES[i + 1]! - YEAR_EDGES[i]!));
+}
+
 interface JevAnswers {
   war: { noul: number };
   politics: { noul: number };
@@ -163,6 +252,11 @@ interface JevAnswers {
   impact: { score: number; confidence: number };
   real: { noul: number };
   accurate: { noul: number };
+  /** Present only when the request included COUNTRY_QUESTION. */
+  country?: { probabilities: Record<string, number> };
+  /** Present only when the request included YEAR_QUESTION (client couldn't
+   * parse a year itself). */
+  year?: { score: number };
 }
 
 interface JevResponse {
@@ -192,16 +286,44 @@ export const REAL_THRESHOLD = 0.3;
  * before changing this wording or threshold. */
 export const ACCURATE_THRESHOLD = 0.1;
 
+/** "none" is the honest fallback: the model was unsure of a country (below
+ * UNKNOWN_COUNTRY_THRESHOLD), or the request never asked (shouldn't
+ * happen in practice — every /ask request includes COUNTRY_QUESTION). The
+ * client must not invent a position for "none" — see src/live/client.ts. */
+export type Location =
+  | { kind: "country"; country: string; lat: number; lon: number }
+  | { kind: "none" };
+
 export type ScoreResult =
-  | { status: "ok"; themes: Record<Theme, number>; impact: number; confidence: number }
+  | { status: "ok"; themes: Record<Theme, number>; impact: number; confidence: number; location?: Location; year?: number }
   | { status: "not_historical" }
   | { status: "not_accurate" };
 
-export function mapJevAnswers(answers: JevAnswers): ScoreResult {
+function resolveLocation(answers: JevAnswers): Location | undefined {
+  if (!answers.country) return undefined;
+  const entries = Object.entries(answers.country.probabilities);
+  if (entries.length === 0) return { kind: "none" };
+  const [name, prob] = entries.reduce((a, b) => (b[1] > a[1] ? b : a));
+  if (prob < UNKNOWN_COUNTRY_THRESHOLD) return { kind: "none" };
+  const centroid = COUNTRY_CENTROIDS[name];
+  if (!centroid) return { kind: "none" };
+  return { kind: "country", country: name, lat: centroid[1], lon: centroid[0] };
+}
+
+export function mapJevAnswers(answers: JevAnswers, parsedYear?: number): ScoreResult {
   if (answers.real.noul < REAL_THRESHOLD) return { status: "not_historical" };
   if (answers.accurate.noul < ACCURATE_THRESHOLD) return { status: "not_accurate" };
   const themes = Object.fromEntries(THEMES.map((t) => [t, answers[t].noul])) as Record<Theme, number>;
-  return { status: "ok", themes, impact: answers.impact.score, confidence: answers.impact.confidence };
+  const location = resolveLocation(answers);
+  const year = parsedYear ?? (answers.year ? yearFromScore(answers.year.score) : undefined);
+  return {
+    status: "ok",
+    themes,
+    impact: answers.impact.score,
+    confidence: answers.impact.confidence,
+    location,
+    year,
+  };
 }
 
 // ---- Rate limiting --------------------------------------------------------
@@ -233,21 +355,22 @@ const GLOBAL_DAILY_SPEND_CAP_USD = 0.5;
  * tokens/day. */
 export const GLOBAL_DAILY_TOKEN_CAP = Math.floor(GLOBAL_DAILY_SPEND_CAP_USD / COST_PER_TOKEN);
 
-/** scripts/score-events.ts's probe measured ~460-680 input tokens/call for
- * its 6 theme questions + impact. This Worker sends the same 7 questions
- * plus two more ("real" and "accurate"), so round the upper end (750,
- * covering 7 questions) up ~15% for the extra "accurate" question — each
- * added noul question costs roughly that much more per call — to 900
- * tok/call as the pre-charge estimate used to decide whether to even start a
- * call. Same "never start a request that could blow the cap" pattern
- * score-events.ts uses for its own token cap.
+/** Was 900 tok/call (6 theme questions + impact + real + accurate). The
+ * /ask feature adds COUNTRY_QUESTION, which scripts/probe-country-question.mjs
+ * measured at ~1650-1665 input tokens/call ON ITS OWN (a 176-option choice
+ * question's criteria list is itself most of the prompt) — plus, when the
+ * client couldn't parse a year, YEAR_QUESTION (a small "score" question,
+ * a few dozen tokens, same shape as "impact" above). Rounding the base 900
+ * up to 1000 for slack and adding the measured country-question cost:
+ * 1000 + 1650 = 2650, rounded up to 2800 tok/call as the pre-charge
+ * estimate used to decide whether to even start a call.
  *
- * At the two ends of that per-call range, the daily cap corresponds to:
- *   11,904,761 / 900 ≈ 13,227 calls/day (worst case, used for the gate)
- *   11,904,761 / 600 ≈ 19,841 calls/day (typical case)
- * Either way, comfortably above anything the per-visitor limits (300/day)
- * could produce short of tens of thousands of distinct daily visitors. */
-export const PRECHARGE_ESTIMATE_TOKENS = 900;
+ * At 2800 tok/call the daily cap corresponds to:
+ *   11,904,761 / 2800 ≈ 4,251 calls/day
+ * Still comfortably above anything the per-visitor limits (300/day) could
+ * produce short of ~14 distinct daily visitors maxing out their quota —
+ * an acceptable ceiling for a personal project's live-scoring feature. */
+export const PRECHARGE_ESTIMATE_TOKENS = 2800;
 
 export interface RateStore {
   get(key: string): Promise<string | null>;
@@ -325,6 +448,13 @@ export default {
     const validated = validateText((body as { text?: unknown } | null)?.text);
     if (!validated.ok) return json({ status: "invalid", message: validated.error }, 400, cors);
 
+    // The client (src/live/parseYear.ts) parses a year out of the text
+    // itself first — free, and more reliable than the model for the
+    // common "1969: ..." case — and only omits it when that fails, in
+    // which case YEAR_QUESTION below asks the model instead.
+    const rawYear = (body as { year?: unknown } | null)?.year;
+    const clientYear = typeof rawYear === "number" && Number.isFinite(rawYear) ? rawYear : undefined;
+
     const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
     const store = kvStore(env.LIMITS);
     const now = Date.now();
@@ -338,12 +468,15 @@ export default {
     // resting" rather than a network-error state.
     if (!(await hasGlobalBudget(store, now))) return json({ status: "resting" }, 503, cors);
 
+    const questions: Record<string, unknown> = { ...QUESTIONS, country: COUNTRY_QUESTION };
+    if (clientYear === undefined) questions.year = YEAR_QUESTION;
+
     let upstream: Response;
     try {
       upstream = await fetch(ENDPOINT, {
         method: "POST",
         headers: { Authorization: `Bearer ${env.TYPESAFE_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ state: validated.text, model: MODEL, questions: QUESTIONS }),
+        body: JSON.stringify({ state: validated.text, model: MODEL, questions }),
       });
     } catch {
       return json({ status: "error", message: "upstream unreachable" }, 502, cors);
@@ -352,6 +485,6 @@ export default {
 
     const data = (await upstream.json()) as JevResponse;
     await recordSpend(store, data.usage.input_tokens, now);
-    return json(mapJevAnswers(data.answers), 200, cors);
+    return json(mapJevAnswers(data.answers, clientYear), 200, cors);
   },
 };
