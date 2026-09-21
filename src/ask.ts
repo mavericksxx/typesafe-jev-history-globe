@@ -48,12 +48,26 @@ async function boot(): Promise<void> {
   const globe = new Globe(globeCanvas);
   const globeNote = byId("askGlobeNote");
 
+  /** The pin currently on screen, kept so a resize can repaint it. This page
+   * has no animation loop — it draws once per score — and `globe.resize()`
+   * reallocates the canvases, so without this a resize leaves a blank globe
+   * until the next keystroke. Mobile browsers fire one a moment after load
+   * when the URL bar collapses, which wiped the globe on phones. */
+  let lastPin: { pin: HistoryEvent; approx: boolean } | null = null;
+
   function resizeGlobe(): void {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    globe.resize(globeBox.clientWidth, dpr);
+    const size = globeBox.clientWidth;
+    if (size <= 0) return; // not laid out yet; a later resize will catch it
+    globe.resize(size, dpr);
+    if (lastPin) drawPin(lastPin.pin, lastPin.approx);
   }
   window.addEventListener("resize", resizeGlobe);
+  // Orientation changes report the old size if measured too early, and some
+  // mobile browsers settle the viewport a frame or two after load.
+  window.addEventListener("orientationchange", () => setTimeout(resizeGlobe, 150));
   resizeGlobe();
+  requestAnimationFrame(resizeGlobe);
 
   /** Draws the pin plus nearby corpus events once, statically (no
    * animation loop — this page isn't a playback scrubber). All included
@@ -61,6 +75,7 @@ async function boot(): Promise<void> {
    * dots.ts's age-based fade never kicks in; they're meant to all read as
    * "present" at once, not as a moving window in time. */
   function drawPin(pin: HistoryEvent, yearIsApproximate = false): void {
+    lastPin = { pin, approx: yearIsApproximate };
     const windowYears = contextWindowYears(pin.year);
     const context = events.filter((e) => e.locKind !== "none" && Math.abs(e.year - pin.year) <= windowYears).slice(0, 400);
     const POS = 0.999;
@@ -136,6 +151,8 @@ async function boot(): Promise<void> {
         minor: false,
       }, state.yearIsApproximate === true);
     } else if (state.kind !== "loading") {
+      // Nothing pinned any more, so a later resize must not repaint a stale pin.
+      lastPin = null;
       globeNote.textContent = "Type an event above.";
     }
   }
