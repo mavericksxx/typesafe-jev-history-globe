@@ -23,7 +23,7 @@ const WORKER_URL = import.meta.env.VITE_JEV_WORKER_URL as string | undefined;
 export type LiveState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "scored"; themes: Record<Theme, number>; impact: number; confidence: number; location: LiveLocation; year?: number }
+  | { kind: "scored"; themes: Record<Theme, number>; impact: number; confidence: number; location: LiveLocation; year?: number; yearIsApproximate?: boolean }
   | { kind: "not_historical" }
   | { kind: "not_accurate" }
   | { kind: "rate_limited" }
@@ -60,6 +60,7 @@ export async function scoreLive(text: string, signal: AbortSignal): Promise<Live
     confidence?: number;
     location?: LiveLocation;
     year?: number;
+    yearIsApproximate?: boolean;
   };
 
   if (data.status === "not_historical") return { kind: "not_historical" };
@@ -72,6 +73,7 @@ export async function scoreLive(text: string, signal: AbortSignal): Promise<Live
       confidence: data.confidence,
       location: data.location ?? { kind: "none" },
       year: data.year,
+      yearIsApproximate: data.yearIsApproximate,
     };
   }
   return { kind: "error" };

@@ -295,7 +295,7 @@ export type Location =
   | { kind: "none" };
 
 export type ScoreResult =
-  | { status: "ok"; themes: Record<Theme, number>; impact: number; confidence: number; location?: Location; year?: number }
+  | { status: "ok"; themes: Record<Theme, number>; impact: number; confidence: number; location?: Location; year?: number; yearIsApproximate?: boolean }
   | { status: "not_historical" }
   | { status: "not_accurate" };
 
@@ -315,7 +315,14 @@ export function mapJevAnswers(answers: JevAnswers, parsedYear?: number): ScoreRe
   if (answers.accurate.noul < ACCURATE_THRESHOLD) return { status: "not_accurate" };
   const themes = Object.fromEntries(THEMES.map((t) => [t, answers[t].noul])) as Record<Theme, number>;
   const location = resolveLocation(answers);
+  // A year the client parsed out of the text ("1969: ...") is exact. A year
+  // derived from YEAR_QUESTION is an 8-bucket interpolation and is only ever
+  // roughly right — probed live, "1969: Apollo 11..." came back 1900 and
+  // "1789: the storming of the Bastille" 1750. That is fine for placing a pin
+  // in an era, but presenting it as a precise date would be a lie, so the
+  // caller is told which kind it got and hedges the label accordingly.
   const year = parsedYear ?? (answers.year ? yearFromScore(answers.year.score) : undefined);
+  const yearIsApproximate = parsedYear === undefined && year !== undefined;
   return {
     status: "ok",
     themes,
@@ -323,6 +330,7 @@ export function mapJevAnswers(answers: JevAnswers, parsedYear?: number): ScoreRe
     confidence: answers.impact.confidence,
     location,
     year,
+    yearIsApproximate,
   };
 }
 

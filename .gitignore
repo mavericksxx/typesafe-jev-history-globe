@@ -7,3 +7,4 @@ data/cache/
 .DS_Store
 *.tsbuildinfo
 .claude/worktrees/
+.cf.env

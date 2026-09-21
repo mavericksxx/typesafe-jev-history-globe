@@ -60,7 +60,7 @@ async function boot(): Promise<void> {
    * events (context + pin) are given the same synthetic `t`/`pos` so
    * dots.ts's age-based fade never kicks in; they're meant to all read as
    * "present" at once, not as a moving window in time. */
-  function drawPin(pin: HistoryEvent): void {
+  function drawPin(pin: HistoryEvent, yearIsApproximate = false): void {
     const windowYears = contextWindowYears(pin.year);
     const context = events.filter((e) => e.locKind !== "none" && Math.abs(e.year - pin.year) <= windowYears).slice(0, 400);
     const POS = 0.999;
@@ -77,7 +77,12 @@ async function boot(): Promise<void> {
       pulses: [],
       now: performance.now(),
     });
-    globeNote.textContent = `Pinned near ${pin.year < 0 ? `${-pin.year} BC` : pin.year} · ${context.length} nearby events shown for context.`;
+    // A year the model guessed (rather than one parsed out of the text) comes
+    // from an 8-bucket interpolation and is only era-accurate, so it's hedged
+    // with "around" rather than stated as a date.
+    const shown = pin.year < 0 ? `${-pin.year} BC` : String(pin.year);
+    const when = yearIsApproximate ? `around ${shown}` : shown;
+    globeNote.textContent = `Pinned ${when} · ${context.length} nearby events shown for context.`;
   }
 
   // ---------- input + scoring (debounce, abort, all states) ----------
@@ -129,7 +134,7 @@ async function boot(): Promise<void> {
         region: "europe",
         real: true,
         minor: false,
-      });
+      }, state.yearIsApproximate === true);
     } else if (state.kind !== "loading") {
       globeNote.textContent = "Type an event above.";
     }

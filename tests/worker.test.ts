@@ -77,12 +77,26 @@ describe("validateText", () => {
 describe("mapJevAnswers", () => {
   it("maps a normal event to status ok with themes/impact/confidence", () => {
     const result = mapJevAnswers(fullAnswers());
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       status: "ok",
       themes: { war: 0.9, politics: 0.4, religion: 0.1, economy: 0.05, science: 0.02, culture: 0.1 },
       impact: 3,
       confidence: 0.95,
     });
+    // No country answer and no year in this fixture, so neither is resolved —
+    // and with no year at all there is nothing to call approximate.
+    expect(result).toMatchObject({ location: undefined, year: undefined, yearIsApproximate: false });
+  });
+
+  it("marks a model-derived year approximate and a parsed year exact", () => {
+    // fullAnswers() only knows the fixed question set, so the optional `year`
+    // answer (present only when the client couldn't parse one) is added here.
+    const withYear = { ...fullAnswers(), year: { score: 6 } };
+    const guessed = mapJevAnswers(withYear);
+    expect(guessed).toMatchObject({ status: "ok", yearIsApproximate: true });
+
+    const parsed = mapJevAnswers(withYear, 1969);
+    expect(parsed).toMatchObject({ status: "ok", year: 1969, yearIsApproximate: false });
   });
 
   it("flags input below the real-event threshold as not_historical", () => {
