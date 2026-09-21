@@ -39,6 +39,50 @@ export function sparseSizeScale(windowCount: number): number {
   return 1 + t * (MAX_SPARSE_SCALE - 1);
 }
 
+/** Below this confidence, Jev's judgment is dimmed on the globe. Corpus
+ * median confidence is 0.93 and only 417/15356 events fall under 0.3, so
+ * this threshold leaves the overwhelming majority of dots untouched. */
+const CONF_DIM_THRESHOLD = 0.3;
+/** Floor multiplier as confidence -> 0. Never fully hides a low-confidence
+ * event — it recedes, it doesn't vanish (sparseAlphaFloor already exists to
+ * stop dots from disappearing; this composes with it, see paintDots). */
+const CONF_DIM_FLOOR = 0.4;
+
+/**
+ * Alpha multiplier from Jev's confidence in an event's scoring. Deliberately
+ * NOT a linear 0..1 map — that would dim most of the corpus, since even
+ * "low" confidence in this dataset (0.3) is still fairly high in absolute
+ * terms. Instead this is 1 (no effect) at and above CONF_DIM_THRESHOLD, and
+ * eases in quadratically below it, so the dimming only bites the long tail
+ * of genuinely uncertain judgments.
+ */
+export function confidenceAlpha(conf: number): number {
+  if (conf >= CONF_DIM_THRESHOLD) return 1;
+  const t = Math.max(0, conf) / CONF_DIM_THRESHOLD;
+  return CONF_DIM_FLOOR + (1 - CONF_DIM_FLOOR) * t * t;
+}
+
+/** Quantizes confidenceAlpha's output to steps of 0.05 so paintDots can fold
+ * it into its (theme, minor, ageBucket, approximate) batching key without
+ * fragmenting into a near-per-dot group for every distinct confidence value
+ * — in practice almost every dot lands on the 1.00 step (unaffected), same
+ * as before this feature existed. */
+function quantizeConfMult(mult: number): number {
+  return Math.round(mult * 20) / 20;
+}
+
+/** Impact, 0..3, is heavily bottom-weighted (corpus median 0.08, mean 0.58)
+ * — a linear radius bump would barely separate the ~507 genuinely
+ * world-historical events (impact >= 2) from the mass of ordinary ones. A
+ * cubic ease-in instead keeps anything below ~impact 1 essentially at its
+ * base size (legible, not lost) while letting the top of the range grow
+ * sharply, so WWI/WWII-tier events visibly dominate their era. */
+const IMPACT_BOOST_MAX = 4;
+export function impactSizeBoost(impact: number): number {
+  const t = Math.max(0, Math.min(1, impact / 3));
+  return t * t * t * IMPACT_BOOST_MAX;
+}
+
 export type Project = (lon: number, lat: number) => [number, number] | null;
 
 export function makeProjector(projection: GeoProjection, center: [number, number]): Project {
@@ -66,6 +110,9 @@ export interface DotDraw {
    * rather than a real point — painted hollow so they read as "somewhere in
    * this country" instead of implying precision the source data doesn't have. */
   approximate: boolean;
+  /** Quantized confidenceAlpha(e.conf) — see paintDots for how it composes
+   * with the fade/sparse-floor alpha. */
+  confMult: number;
 }
 
 /**
@@ -92,11 +139,12 @@ export function prepareDots(
     out.push({
       x: p[0],
       y: p[1],
-      r: ((e.minor ? 1.6 : 2.4) + e.impact * 1.2) * sizeScale,
+      r: ((e.minor ? 1.6 : 2.4) + impactSizeBoost(e.impact)) * sizeScale,
       theme: e.top,
       minor: e.minor,
       ageBucket,
       approximate: e.locKind === "country",
+      confMult: quantizeConfMult(confidenceAlpha(e.conf)),
     });
   }
   return out;
@@ -134,7 +182,7 @@ export function paintDots(
 ): void {
   const groups = new Map<string, DotDraw[]>();
   for (const d of dots) {
-    const key = `${d.theme}|${d.minor ? 1 : 0}|${d.ageBucket}|${d.approximate ? 1 : 0}`;
+    const key = `${d.theme}|${d.minor ? 1 : 0}|${d.ageBucket}|${d.approximate ? 1 : 0}|${d.confMult}`;
     let arr = groups.get(key);
     if (!arr) {
       arr = [];
@@ -148,7 +196,12 @@ export function paintDots(
     const minor = parts[1] === "1";
     const ageBucket = Number(parts[2]);
     const approximate = parts[3] === "1";
-    const alpha = Math.max(fadeForBucket(ageBucket), alphaFloor) * (minor ? 0.55 : 1);
+    const confMult = Number(parts[4]);
+    // Sparse-floor + age fade first (a low-confidence event in a sparse
+    // ancient window still gets the floor), then confidence dims what's
+    // left — so it recedes relative to its confident neighbours instead of
+    // overriding the floor outright.
+    const alpha = Math.max(fadeForBucket(ageBucket), alphaFloor) * (minor ? 0.55 : 1) * confMult;
     if (alpha <= 0.01) continue;
     ctx.beginPath();
     for (const d of group) {
