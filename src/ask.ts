@@ -2,10 +2,12 @@
 // build) for live-scoring a typed event and pinning it on a globe, alongside
 // the corpus's own events from the same era for context. Boot + DOM wiring
 // only, same split as main.ts/loop.ts, just for a much smaller page — there
-// is no timeline, no playback, no narrative; the globe here draws exactly
-// once per successful score, not on an animation loop.
+// is no timeline, no playback and no narrative. It does run a small animation
+// loop: the galaxy backdrop drifts, and the globe eases round to each new pin
+// from a resting view of the corpus.
 import "./styles/main.css";
 import { Globe } from "./globe";
+import { GalaxyBackdrop } from "./galaxy/backdrop";
 import type { HistoryEvent } from "./data/types";
 import { THEMES } from "./data/types";
 import { T } from "./data/timescale";
@@ -43,24 +45,47 @@ async function boot(): Promise<void> {
   const columnar = await loadColumnarIndex(DATA_BASE, manifest);
   const events = eventsFromColumnar(columnar);
 
+  // The galaxy field behind everything, same as the main page — the #galaxyBg
+  // canvas was already in this page's markup but nothing was ever driving it,
+  // so /ask rendered on flat black while the globe page had stars.
+  const backdropCanvas = byId("galaxyBg") as HTMLCanvasElement;
+  const backdrop = new GalaxyBackdrop(backdropCanvas, theme);
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function resizeBackdrop(): void {
+    backdrop.setTheme(theme, window.innerWidth, window.innerHeight);
+  }
+  resizeBackdrop();
+  window.addEventListener("resize", resizeBackdrop);
+
   const globeBox = byId("askGlobeBox");
   const globeCanvas = byId("askGlobe") as HTMLCanvasElement;
   const globe = new Globe(globeCanvas);
   const globeNote = byId("askGlobeNote");
 
-  /** The pin currently on screen, kept so a resize can repaint it. This page
-   * has no animation loop — it draws once per score — and `globe.resize()`
-   * reallocates the canvases, so without this a resize leaves a blank globe
-   * until the next keystroke. Mobile browsers fire one a moment after load
-   * when the URL bar collapses, which wiped the globe on phones. */
-  let lastPin: { pin: HistoryEvent; approx: boolean } | null = null;
+  /** What the globe is currently showing. The page has no timeline, but it
+   * does animate: the globe sits at rest showing a spread of the corpus, then
+   * rotates to the pin when a score lands. `shown` is what a repaint needs —
+   * a resize reallocates the canvases, so we must be able to redraw at any
+   * moment (mobile browsers fire a resize when the URL bar collapses, which
+   * used to leave a blank globe). */
+  let shown: { pin: HistoryEvent | null; context: HistoryEvent[]; approx: boolean } = {
+    pin: null,
+    context: [],
+    approx: false,
+  };
+  const POS = 0.999;
+  /** Current and target camera rotation, eased between so a new pin glides
+   * into view rather than cutting. */
+  let rot: [number, number] = [-10, -15];
+  let rotTarget: [number, number] = [-10, -15];
+  let globeDirty = true;
 
   function resizeGlobe(): void {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const size = globeBox.clientWidth;
     if (size <= 0) return; // not laid out yet; a later resize will catch it
     globe.resize(size, dpr);
-    if (lastPin) drawPin(lastPin.pin, lastPin.approx);
+    globeDirty = true;
   }
   window.addEventListener("resize", resizeGlobe);
   // Orientation changes report the old size if measured too early, and some
@@ -69,21 +94,13 @@ async function boot(): Promise<void> {
   resizeGlobe();
   requestAnimationFrame(resizeGlobe);
 
-  /** Draws the pin plus nearby corpus events once, statically (no
-   * animation loop — this page isn't a playback scrubber). All included
-   * events (context + pin) are given the same synthetic `t`/`pos` so
-   * dots.ts's age-based fade never kicks in; they're meant to all read as
-   * "present" at once, not as a moving window in time. */
-  function drawPin(pin: HistoryEvent, yearIsApproximate = false): void {
-    lastPin = { pin, approx: yearIsApproximate };
-    const windowYears = contextWindowYears(pin.year);
-    const context = events.filter((e) => e.locKind !== "none" && Math.abs(e.year - pin.year) <= windowYears).slice(0, 400);
-    const POS = 0.999;
-    const all: HistoryEvent[] = [...context.map((e) => ({ ...e, t: POS })), { ...pin, t: POS }];
+  function paintGlobe(): void {
+    const all: HistoryEvent[] = shown.context.map((e) => ({ ...e, t: POS }));
+    if (shown.pin) all.push({ ...shown.pin, t: POS });
     globe.draw({
       theme,
       accent: theme.accent,
-      rot: [-pin.lon, -pin.lat],
+      rot,
       pos: POS,
       all,
       dotStart: 0,
@@ -92,13 +109,64 @@ async function boot(): Promise<void> {
       pulses: [],
       now: performance.now(),
     });
-    // A year the model guessed (rather than one parsed out of the text) comes
-    // from an 8-bucket interpolation and is only era-accurate, so it's hedged
-    // with "around" rather than stated as a date.
-    const shown = pin.year < 0 ? `${-pin.year} BC` : String(pin.year);
-    const when = yearIsApproximate ? `around ${shown}` : shown;
+  }
+
+  /** Shortest way round the sphere, so rotating from 170° to -170° goes 20°
+   * the near way rather than 340° the long way. */
+  function shortestDelta(from: number, to: number): number {
+    return ((to - from + 540) % 360) - 180;
+  }
+
+  // One loop drives the galaxy backdrop (it has drifting stars of its own)
+  // and the globe's rotation easing. The globe only repaints when something
+  // actually changed — at rest this costs a backdrop draw and nothing else.
+  function frame(now: number): void {
+    backdrop.draw(now, reducedMotion, 0);
+    const dLon = shortestDelta(rot[0], rotTarget[0]);
+    const dLat = rotTarget[1] - rot[1];
+    if (Math.abs(dLon) > 0.05 || Math.abs(dLat) > 0.05) {
+      const k = reducedMotion ? 1 : 0.12;
+      rot = [rot[0] + dLon * k, rot[1] + dLat * k];
+      globeDirty = true;
+    }
+    if (globeDirty) {
+      globeDirty = false;
+      paintGlobe();
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  /** A spread of the corpus for the globe to show before anyone has typed
+   * anything — the page shouldn't open on an empty sphere. Takes the most
+   * significant events across all of history rather than one era's worth, so
+   * the resting globe reads as "everything we know" and the pin later reads
+   * as "and here's yours". */
+  function showIdleGlobe(): void {
+    const spread = events
+      .filter((e) => e.locKind !== "none")
+      .sort((a, b) => b.impact - a.impact)
+      .slice(0, 600);
+    shown = { pin: null, context: spread, approx: false };
+    globeDirty = true;
+  }
+
+  /** Swaps the globe to the scored event: its own era for context, the pin on
+   * top, and the camera eased round to it. */
+  function drawPin(pin: HistoryEvent, yearIsApproximate = false): void {
+    const windowYears = contextWindowYears(pin.year);
+    const context = events
+      .filter((e) => e.locKind !== "none" && Math.abs(e.year - pin.year) <= windowYears)
+      .slice(0, 400);
+    shown = { pin, context, approx: yearIsApproximate };
+    rotTarget = [-pin.lon, -pin.lat];
+    globeDirty = true;
+    const label = pin.year < 0 ? `${-pin.year} BC` : String(pin.year);
+    const when = yearIsApproximate ? `around ${label}` : label;
     globeNote.textContent = `Pinned ${when} · ${context.length} nearby events shown for context.`;
   }
+
+  showIdleGlobe();
 
   // ---------- input + scoring (debounce, abort, all states) ----------
   const input = byId("askInput") as HTMLInputElement;
@@ -151,9 +219,9 @@ async function boot(): Promise<void> {
         minor: false,
       }, state.yearIsApproximate === true);
     } else if (state.kind !== "loading") {
-      // Nothing pinned any more, so a later resize must not repaint a stale pin.
-      lastPin = null;
-      globeNote.textContent = "Type an event above.";
+      // Back to the resting globe rather than leaving the last pin stranded.
+      showIdleGlobe();
+      globeNote.textContent = "Type an event above — the globe will move to it.";
     }
   }
 

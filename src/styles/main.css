@@ -400,10 +400,15 @@ h1::before { content: ""; display: inline-block; width: 7px; height: 7px; margin
 .ask-loc { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); margin-top: 2px; }
 .ask-loc.is-error { color: var(--ox); }
 .ask-layout { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr); }
-.ask-globe-col .globe-box { max-width: 420px; margin-inline: auto; }
+/* The globe is capped rather than filling its column: on a wide screen the
+   right column is ~700px+, and an unbounded square runs off the bottom of the
+   viewport. Centred in both axes so it reads as a companion to the form. */
+.ask-globe-col { display: flex; flex-direction: column; justify-content: center; gap: 10px; }
+.ask-globe-col .globe-box { width: min(440px, 100%); margin-inline: auto; }
 @media (min-width: 861px) {
   .ask-layout { grid-template-columns: minmax(0, 420px) minmax(0, 1fr); align-items: start; }
-  .ask-globe-col .globe-box { max-width: 100%; }
+  .ask-globe-col .globe-box { width: min(480px, 100%, calc(100vh - 220px)); }
+  .ask-globe-col { position: sticky; top: 90px; }
 }
 .live-panel .q { margin-bottom: 2px; }
 .live-panel .bars { min-height: 0; }
